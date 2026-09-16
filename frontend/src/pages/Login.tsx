@@ -117,10 +117,7 @@ export function Login() {
             <strong className="font-medium text-ink">ne peut pas lire</strong> votre boîte
             de réception. Elle demande l’envoi, rien d’autre.
           </Point>
-          <Point icon="gauge">
-            Le rythme reste sous les limites de Gmail, pour ne pas faire repérer votre
-            compte.
-          </Point>
+          <Point icon="gauge">Le rythme reste sous les limites de Gmail. </Point>
         </ul>
       </main>
 
