@@ -24,6 +24,7 @@ import type { Pool, PoolClient } from 'pg'
 export const BACKED_UP_TABLES = [
   'users',
   'campaigns',
+  'campaign_attachments',
   'contacts',
   'logs',
   'audit_events',

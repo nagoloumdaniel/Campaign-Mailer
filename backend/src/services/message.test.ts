@@ -73,7 +73,7 @@ describe('buildMimeMessage', () => {
     assert.match(mime, /^Date: /m)
   })
 
-  describe('with an attachment', () => {
+  describe('with attachments', () => {
     const attachment = {
       filename: 'CV Marie Dupont.pdf',
       content: Buffer.from('%PDF-1.4 fake'),
@@ -81,21 +81,21 @@ describe('buildMimeMessage', () => {
     }
 
     it('nests the body inside a mixed part', async () => {
-      const mime = await build({ attachment })
+      const mime = await build({ attachments: [attachment] })
 
       assert.match(mime, /multipart\/mixed/)
       assert.match(mime, /multipart\/alternative/)
     })
 
     it('names the file and marks it as an attachment', async () => {
-      const mime = await build({ attachment })
+      const mime = await build({ attachments: [attachment] })
 
       assert.match(mime, /Content-Disposition: attachment/)
       assert.match(mime, /CV Marie Dupont\.pdf/)
     })
 
     it('encodes the bytes in base64', async () => {
-      const mime = await build({ attachment })
+      const mime = await build({ attachments: [attachment] })
 
       assert.match(mime, /Content-Type: application\/pdf/)
       assert.ok(mime.includes(Buffer.from('%PDF-1.4 fake').toString('base64')))
@@ -103,7 +103,7 @@ describe('buildMimeMessage', () => {
 
     it('encodes an accented filename', async () => {
       const mime = await build({
-        attachment: { ...attachment, filename: 'Curriculum vitæ Amélie.pdf' },
+        attachments: [{ ...attachment, filename: 'Curriculum vitæ Amélie.pdf' }],
       })
 
       const disposition = mime
@@ -111,6 +111,25 @@ describe('buildMimeMessage', () => {
         .find((line) => line.startsWith('Content-Disposition:'))
 
       assert.ok(disposition && isAscii(disposition))
+    })
+
+    it('carries several files, in the order they were given', async () => {
+      const mime = await build({
+        attachments: [
+          attachment,
+          {
+            filename: 'Lettre.pdf',
+            content: Buffer.from('%PDF lettre'),
+            contentType: 'application/pdf',
+          },
+        ],
+      })
+
+      const cv = mime.indexOf('CV Marie Dupont.pdf')
+      const letter = mime.indexOf('Lettre.pdf')
+
+      assert.ok(cv > -1 && letter > -1, 'both files should be in the message')
+      assert.ok(cv < letter, 'the order of the upload should be the order in the message')
     })
   })
 

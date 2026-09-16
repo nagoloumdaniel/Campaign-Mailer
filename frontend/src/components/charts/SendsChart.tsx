@@ -2,19 +2,20 @@ import { useId, useState } from 'react'
 
 import type { DaySends } from '@/services/campaigns'
 import { continuousDays, niceMax } from '@/services/chartScale'
+import { countOf } from '@/services/format'
 
 /**
  * Sends per day, as stacked columns: sent at the base, failures on top.
  *
- * Plain HTML rather than a charting library. It is one chart of at most thirty
- * columns, and a library would add more weight to the bundle than the rest of
- * this page. The two colours were run through the palette validator against
- * this surface: colour-blind separation ΔE 23.8, normal vision ΔE 31.6, both
- * above 3:1 contrast.
+ * Plain HTML and CSS rather than a charting library. It is one chart of at
+ * most thirty columns, and a library would add more weight to the bundle than
+ * the rest of this page — and would then have to be taught the theme, which
+ * these colours get for free by being theme tokens.
+ *
+ * Every column is a button, so the values are reachable from a keyboard and
+ * announced one by one; the figures are also laid out as a table underneath,
+ * behind a disclosure, for anyone who would rather read them than hover.
  */
-
-const SENT = '#2a78d6'
-const FAILED = '#d03b3b'
 
 const DAY_LABEL = new Intl.DateTimeFormat('fr-FR', {
   day: 'numeric',
@@ -27,9 +28,9 @@ function dayLabel(day: string): string {
 }
 
 function describe(day: DaySends): string {
-  const sent = `${String(day.sent)} envoyé${day.sent > 1 ? 's' : ''}`
+  const sent = countOf(day.sent, 'envoyé')
   return day.failed > 0
-    ? `${dayLabel(day.day)} : ${sent}, ${String(day.failed)} en erreur`
+    ? `${dayLabel(day.day)} : ${sent}, ${countOf(day.failed, 'erreur')}`
     : `${dayLabel(day.day)} : ${sent}`
 }
 
@@ -40,7 +41,7 @@ export function SendsChart({ days }: { days: readonly DaySends[] }) {
 
   if (series.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-ink-muted">
+      <p className="rounded-card border border-dashed border-border px-4 py-8 text-center text-[13px] text-ink-muted">
         Aucun envoi pour l’instant. Le graphique se remplit au premier message parti.
       </p>
     )
@@ -70,27 +71,19 @@ export function SendsChart({ days }: { days: readonly DaySends[] }) {
   return (
     <figure aria-labelledby={titleId} className="m-0">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <figcaption id={titleId} className="text-sm font-medium">
+        <figcaption id={titleId} className="text-[13px] font-medium">
           Envois par jour
         </figcaption>
 
         {/* Two series, so a legend; identity is never colour alone. */}
         <ul className="flex gap-4 text-xs text-ink-muted">
           <li className="flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="size-2.5 rounded-sm"
-              style={{ background: SENT }}
-            />
+            <span aria-hidden className="size-2.5 rounded-sm bg-accent" />
             Envoyés
           </li>
           {hasFailures && (
             <li className="flex items-center gap-1.5">
-              <span
-                aria-hidden
-                className="size-2.5 rounded-sm"
-                style={{ background: FAILED }}
-              />
+              <span aria-hidden className="size-2.5 rounded-sm bg-danger" />
               En erreur
             </li>
           )}
@@ -98,10 +91,10 @@ export function SendsChart({ days }: { days: readonly DaySends[] }) {
       </div>
 
       <div className="relative mt-3 flex gap-2">
-        {/* Y axis: three clean ticks, text in ink, never in the series colour. */}
+        {/* Y axis: three clean ticks, text in ink, never in a series colour. */}
         <div
           aria-hidden
-          className="flex h-40 w-8 shrink-0 flex-col justify-between text-right text-[11px] text-ink-muted tabular-nums"
+          className="tabular flex h-40 w-8 shrink-0 flex-col justify-between text-right text-[11px] text-ink-subtle"
         >
           <span className="-translate-y-1/2">{max}</span>
           <span>{max / 2}</span>
@@ -113,7 +106,7 @@ export function SendsChart({ days }: { days: readonly DaySends[] }) {
           <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-40">
             <div className="absolute inset-x-0 top-0 border-t border-border" />
             <div className="absolute inset-x-0 top-1/2 border-t border-border" />
-            <div className="absolute inset-x-0 bottom-0 border-t border-ink-muted/40" />
+            <div className="absolute inset-x-0 bottom-0 border-t border-border-strong" />
           </div>
 
           <ol className="relative flex h-40 items-end">
@@ -142,19 +135,19 @@ export function SendsChart({ days }: { days: readonly DaySends[] }) {
                     className="group flex h-full w-full cursor-default items-end justify-center rounded-sm focus-visible:outline-offset-0"
                   >
                     <span
-                      className="flex w-full max-w-6 flex-col gap-0.5 transition-opacity duration-150 group-hover:opacity-80"
+                      className="flex w-full max-w-6 flex-col gap-0.5 transition-[height,opacity] duration-500 ease-out group-hover:opacity-80 motion-reduce:transition-none"
                       style={{ height: `${String(height)}%` }}
                     >
                       {day.failed > 0 && (
                         <span
-                          className="rounded-t-sm"
-                          style={{ flexGrow: day.failed, background: FAILED }}
+                          className="rounded-t-sm bg-danger"
+                          style={{ flexGrow: day.failed }}
                         />
                       )}
                       {day.sent > 0 && (
                         <span
-                          className={day.failed > 0 ? '' : 'rounded-t-sm'}
-                          style={{ flexGrow: day.sent, background: SENT }}
+                          className={`bg-accent ${day.failed > 0 ? '' : 'rounded-t-sm'}`}
+                          style={{ flexGrow: day.sent }}
                         />
                       )}
                     </span>
@@ -164,7 +157,7 @@ export function SendsChart({ days }: { days: readonly DaySends[] }) {
             })}
           </ol>
 
-          <ol aria-hidden className="mt-1.5 flex text-[11px] text-ink-muted">
+          <ol aria-hidden className="mt-1.5 flex text-[11px] text-ink-subtle">
             {series.map((day, index) => (
               <li key={day.day} className="flex-1 text-center whitespace-nowrap">
                 {showLabel(index) ? dayLabel(day.day) : ''}
@@ -175,23 +168,23 @@ export function SendsChart({ days }: { days: readonly DaySends[] }) {
           {activeDay && active !== null && (
             <div
               role="status"
-              className="pointer-events-none absolute top-0 z-10 -translate-x-1/2 -translate-y-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs shadow-sm"
+              className="pointer-events-none absolute top-0 z-10 -translate-x-1/2 -translate-y-full rounded-xl border border-border bg-surface px-3 py-2 text-xs shadow-pop"
               style={{ left: `${String(tooltipLeft)}%` }}
             >
               <p className="text-ink-muted">{dayLabel(activeDay.day)}</p>
               <p className="mt-1 flex items-center gap-2">
-                <span aria-hidden className="h-0.5 w-3" style={{ background: SENT }} />
-                <strong className="font-semibold text-ink">{activeDay.sent}</strong>
+                <span aria-hidden className="h-0.5 w-3 bg-accent" />
+                <strong className="tabular font-semibold text-ink">
+                  {activeDay.sent}
+                </strong>
                 <span className="text-ink-muted">envoyés</span>
               </p>
               {activeDay.failed > 0 && (
                 <p className="mt-0.5 flex items-center gap-2">
-                  <span
-                    aria-hidden
-                    className="h-0.5 w-3"
-                    style={{ background: FAILED }}
-                  />
-                  <strong className="font-semibold text-ink">{activeDay.failed}</strong>
+                  <span aria-hidden className="h-0.5 w-3 bg-danger" />
+                  <strong className="tabular font-semibold text-ink">
+                    {activeDay.failed}
+                  </strong>
                   <span className="text-ink-muted">en erreur</span>
                 </p>
               )}
@@ -205,9 +198,9 @@ export function SendsChart({ days }: { days: readonly DaySends[] }) {
         <summary className="cursor-pointer text-ink-muted hover:text-ink">
           Voir les chiffres
         </summary>
-        <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-border">
+        <div className="mt-2 max-h-56 overflow-y-auto rounded-xl border border-border">
           <table className="w-full text-left">
-            <thead className="sticky top-0 bg-surface-raised text-ink-muted">
+            <thead className="sticky top-0 bg-surface-2 text-ink-muted">
               <tr>
                 <th className="px-3 py-1.5 font-medium">Jour</th>
                 <th className="px-3 py-1.5 text-right font-medium">Envoyés</th>
@@ -218,8 +211,8 @@ export function SendsChart({ days }: { days: readonly DaySends[] }) {
               {series.map((day) => (
                 <tr key={day.day} className="border-t border-border">
                   <td className="px-3 py-1.5">{dayLabel(day.day)}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{day.sent}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{day.failed}</td>
+                  <td className="px-3 py-1.5 text-right">{day.sent}</td>
+                  <td className="px-3 py-1.5 text-right">{day.failed}</td>
                 </tr>
               ))}
             </tbody>

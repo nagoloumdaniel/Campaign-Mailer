@@ -16,9 +16,26 @@ const contact: SendableContact = {
   attempts: 0,
 }
 
-function poolReturning(row: Record<string, unknown> | undefined): Pool {
+interface StoredFile {
+  object_key: string
+  name: string
+}
+
+/**
+ * The composer asks two questions: the campaign, then its attachments. The
+ * fake tells them apart by the table named in the statement, so a test can
+ * hand back a campaign and no file without the second query returning the
+ * first query's row.
+ */
+function poolReturning(
+  row: Record<string, unknown> | undefined,
+  files: StoredFile[],
+): Pool {
   return {
-    query: () => Promise.resolve({ rows: row ? [row] : [] }),
+    query: (text: string) =>
+      Promise.resolve({
+        rows: text.includes('campaign_attachments') ? files : row ? [row] : [],
+      }),
   } as unknown as Pool
 }
 
@@ -26,17 +43,16 @@ const campaign = {
   subject: 'Candidature {{contact_name}}',
   body_html: '<p>Bonjour {{contact_name}}</p>',
   body_text: 'Bonjour {{contact_name}}',
-  attachment_key: null,
-  attachment_name: null,
   sender: 'moi@gmail.com',
 }
 
 async function composeWith(
   row: Record<string, unknown> | undefined,
+  files: StoredFile[] = [],
   file = Buffer.from('%PDF'),
 ) {
   const compose = createComposer({
-    pool: poolReturning(row),
+    pool: poolReturning(row, files),
     readAttachment: () => Promise.resolve(file),
   })
   const { raw, to } = await compose(contact)
@@ -66,14 +82,25 @@ describe('the composed message', () => {
   })
 
   it('attaches the stored file with the type its key carries', async () => {
-    const { mime } = await composeWith({
-      ...campaign,
-      attachment_key: 'campaigns/k1/0000.pdf',
-      attachment_name: 'CV.pdf',
-    })
+    const { mime } = await composeWith(campaign, [
+      { object_key: 'campaigns/k1/0000.pdf', name: 'CV.pdf' },
+    ])
 
     assert.match(mime, /Content-Type: application\/pdf; name=CV\.pdf/)
     assert.match(mime, /filename=CV\.pdf/)
+  })
+
+  it('attaches every stored file, in upload order', async () => {
+    const { mime } = await composeWith(campaign, [
+      { object_key: 'campaigns/k1/0000.pdf', name: 'CV.pdf' },
+      { object_key: 'campaigns/k1/0001.docx', name: 'Lettre.docx' },
+    ])
+
+    const cv = mime.indexOf('CV.pdf')
+    const letter = mime.indexOf('Lettre.docx')
+
+    assert.ok(cv > -1 && letter > -1, 'both files should be attached')
+    assert.ok(cv < letter, 'the upload order should be the order in the message')
   })
 
   it('refuses a campaign without a subject rather than sending an empty email', async () => {

@@ -2,57 +2,199 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { useAuth } from '@/auth/useAuth'
+import { Avatar } from '@/components/layout/UserMenu'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { AnchorButton, Button } from '@/components/ui/Button'
+import { Card, CardHeader } from '@/components/ui/Card'
+import { TextField } from '@/components/ui/Field'
+import { Icon } from '@/components/ui/Icon'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { accountApi } from '@/services/account'
 import { ApiError } from '@/services/api'
+import { formatDate } from '@/services/format'
+import { useTheme } from '@/theme/useTheme'
+import type { ThemePreference } from '@/theme/context'
 
 /**
- * The account: what it holds, and how to take it or end it.
+ * The account: who is connected, how it looks, and the two rights over the
+ * data it holds.
  *
- * The two rights of a person over their data sit on one page, in that order —
- * take a copy, then delete — because the copy is what anyone about to delete
- * should be offered first.
+ * Ordered by how often each is used, which puts the destructive one last and
+ * on its own: identity, appearance, export, deletion. The export comes before
+ * the deletion on purpose — the copy is what anyone about to delete should be
+ * offered first, and putting it after would be a trap.
  */
 export function Account() {
   const { user } = useAuth()
+  const email = user?.email ?? ''
 
   return (
-    <div className="max-w-2xl">
-      <h1 className="text-xl font-semibold tracking-tight">Mon compte</h1>
-      <p className="mt-1 text-sm text-ink-muted">
-        Connecté avec <span className="text-ink">{user?.email}</span>.
-      </p>
+    <>
+      <PageHeader
+        title="Mon compte"
+        description="Le compte Google connecté, l’apparence de l’application et vos données."
+      />
 
-      <section aria-labelledby="export-heading" className="mt-8">
-        <h2 id="export-heading" className="text-sm font-medium">
-          Vos données
-        </h2>
-        <p className="mt-1 text-sm text-ink-muted">
-          Une copie de tout ce que l’application conserve à votre sujet : vos campagnes,
-          leurs messages, vos contacts et le journal de chaque envoi.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-3">
-          <a
-            href={accountApi.exportUrl('json')}
-            download
-            className="press rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-surface-raised"
-          >
-            Télécharger toutes mes données (JSON)
-          </a>
-          <a
-            href={accountApi.exportUrl('csv')}
-            download
-            className="press rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-surface-raised"
-          >
-            Télécharger mes contacts (CSV)
-          </a>
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+        <div className="space-y-4">
+          <Identity email={email} createdAt={user?.createdAt} />
+          <Appearance />
         </div>
-      </section>
 
-      <DeleteAccount email={user?.email ?? ''} />
-    </div>
+        <div className="space-y-4">
+          <DataExport />
+          <DeleteAccount email={email} />
+        </div>
+      </div>
+    </>
   )
 }
 
+function Identity({
+  email,
+  createdAt,
+}: {
+  email: string
+  createdAt?: string | undefined
+}) {
+  const { signOut } = useAuth()
+  const navigate = useNavigate()
+  const [leaving, setLeaving] = useState(false)
+
+  return (
+    <Card as="section" aria-labelledby="identity-heading" className="p-5">
+      <CardHeader id="identity-heading" title="Compte connecté" />
+
+      <div className="mt-4 flex items-center gap-3.5">
+        <Avatar email={email} size={52} />
+
+        <div className="min-w-0">
+          <p className="truncate font-display text-[15px] font-semibold">{email}</p>
+          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-muted">
+            <Icon name="mail" size={13} />
+            Les campagnes partent de cette adresse
+          </p>
+        </div>
+      </div>
+
+      <dl className="mt-5 space-y-2 border-t border-border pt-4 text-[13px]">
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-ink-muted">Fournisseur</dt>
+          <dd className="font-medium">Google</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-ink-muted">Compte créé le</dt>
+          <dd className="font-medium">{createdAt ? formatDate(createdAt) : '—'}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-ink-muted">Autorisation</dt>
+          <dd className="font-medium">Envoi d’e-mails uniquement</dd>
+        </div>
+      </dl>
+
+      {/* Said plainly here, because it is the one thing users assume an email
+          application does and this one deliberately cannot. */}
+      <p className="mt-4 flex items-start gap-2 rounded-xl bg-surface-2 px-3.5 py-2.5 text-xs leading-relaxed text-ink-muted">
+        <Icon name="info" size={13} className="mt-px shrink-0" />
+        <span>
+          L’application ne peut pas lire votre boîte de réception. Elle ne demande que
+          l’autorisation d’envoyer en votre nom.
+        </span>
+      </p>
+
+      <Button
+        variant="secondary"
+        icon="logout"
+        loading={leaving}
+        className="mt-4"
+        onClick={() => {
+          setLeaving(true)
+          void signOut().finally(() => {
+            void navigate('/login', { replace: true })
+          })
+        }}
+      >
+        Se déconnecter
+      </Button>
+    </Card>
+  )
+}
+
+/**
+ * The full three-way theme choice, which the header's single button cannot
+ * offer: light, dark, or follow the operating system.
+ */
+function Appearance() {
+  const { preference, resolved, setPreference } = useTheme()
+
+  return (
+    <Card as="section" aria-labelledby="theme-heading" className="p-5">
+      <CardHeader
+        id="theme-heading"
+        title="Apparence"
+        description="Appliquée immédiatement et retenue sur cet appareil."
+      />
+
+      <SegmentedControl
+        value={preference}
+        onChange={setPreference}
+        label="Thème de l’interface"
+        className="mt-4 w-full"
+        segments={[
+          { value: 'light' as ThemePreference, label: 'Clair', icon: 'sun' },
+          { value: 'dark' as ThemePreference, label: 'Sombre', icon: 'moon' },
+          { value: 'system' as ThemePreference, label: 'Système', icon: 'monitor' },
+        ]}
+      />
+
+      <p className="mt-3 text-xs leading-relaxed text-ink-muted">
+        {preference === 'system'
+          ? `L’application suit votre système, actuellement en thème ${resolved === 'dark' ? 'sombre' : 'clair'}.`
+          : `Thème ${preference === 'dark' ? 'sombre' : 'clair'} forcé, quel que soit le réglage de votre système.`}
+      </p>
+    </Card>
+  )
+}
+
+function DataExport() {
+  return (
+    <Card as="section" aria-labelledby="export-heading" className="p-5">
+      <CardHeader
+        id="export-heading"
+        title="Vos données"
+        description="Une copie de tout ce que l’application conserve : vos campagnes, leurs messages, vos contacts et le journal de chaque envoi."
+      />
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <AnchorButton
+          href={accountApi.exportUrl('json')}
+          download
+          variant="secondary"
+          icon="download"
+        >
+          Toutes mes données (JSON)
+        </AnchorButton>
+        <AnchorButton
+          href={accountApi.exportUrl('csv')}
+          download
+          variant="secondary"
+          icon="download"
+        >
+          Mes contacts (CSV)
+        </AnchorButton>
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * Deleting the account.
+ *
+ * The confirmation is the address typed out rather than a checkbox, because
+ * this cannot be undone and typing is the one gesture nobody performs by
+ * accident. The same comparison runs on the server, so the button is only
+ * enabled for a request the server will accept.
+ */
 function DeleteAccount({ email }: { email: string }) {
   const { refresh } = useAuth()
   const navigate = useNavigate()
@@ -60,8 +202,6 @@ function DeleteAccount({ email }: { email: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // The same comparison the server makes, so the button is only enabled for a
-  // request the server will accept.
   const confirmed = email !== '' && typed.trim().toLowerCase() === email.toLowerCase()
 
   async function submit(event: FormEvent) {
@@ -81,60 +221,58 @@ function DeleteAccount({ email }: { email: string }) {
       await refresh()
       void navigate('/login', { replace: true, state: { deleted: report } })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'La suppression a échoué.')
+      setError(
+        err instanceof ApiError ? err.message : 'La suppression a échoué. Réessayez.',
+      )
       setBusy(false)
     }
   }
 
   return (
-    <section
-      aria-labelledby="delete-heading"
-      className="mt-10 rounded-xl border border-amber-300 px-5 py-4"
-    >
-      <h2 id="delete-heading" className="text-sm font-medium">
-        Supprimer mon compte
-      </h2>
+    <Card as="section" aria-labelledby="delete-heading" className="border-danger/30 p-5">
+      <CardHeader
+        id="delete-heading"
+        title="Supprimer mon compte"
+        description="Définitif. Téléchargez vos données avant, si vous voulez les garder."
+      />
 
-      <ul className="mt-2 list-disc space-y-1 ps-5 text-sm text-ink-muted">
-        <li>
-          Vos campagnes, vos contacts, leurs journaux et vos pièces jointes sont effacés.
-        </li>
-        <li>Les campagnes en cours s’arrêtent : plus aucun message ne part.</li>
-        <li>L’accès de l’application à votre compte Google est révoqué.</li>
-        <li>
-          C’est définitif. Téléchargez vos données avant, si vous voulez les garder.
-        </li>
+      <ul className="mt-4 space-y-1.5 text-[13px] text-ink-muted">
+        {[
+          'Vos campagnes, vos contacts, leurs journaux et vos pièces jointes sont effacés.',
+          'Les campagnes en cours s’arrêtent : plus aucun message ne part.',
+          'L’accès de l’application à votre compte Google est révoqué.',
+        ].map((line) => (
+          <li key={line} className="flex items-start gap-2">
+            <Icon name="close" size={13} className="mt-1 shrink-0 text-danger" />
+            <span>{line}</span>
+          </li>
+        ))}
       </ul>
 
-      <form onSubmit={(event) => void submit(event)} className="mt-4">
-        <label className="block">
-          <span className="text-sm">Pour confirmer, saisissez votre adresse e-mail</span>
-          <input
-            type="email"
-            value={typed}
-            autoComplete="off"
-            placeholder={email}
-            onChange={(event) => {
-              setTyped(event.target.value)
-            }}
-            className="mt-1.5 w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm"
-          />
-        </label>
+      <form onSubmit={(event) => void submit(event)} className="mt-5">
+        <TextField
+          label="Pour confirmer, saisissez votre adresse e-mail"
+          type="email"
+          value={typed}
+          autoComplete="off"
+          placeholder={email}
+          onChange={(event) => {
+            setTyped(event.target.value)
+          }}
+          {...(error ? { error } : {})}
+        />
 
-        {error && (
-          <p role="alert" className="mt-3 text-sm text-amber-700">
-            {error}
-          </p>
-        )}
-
-        <button
+        <Button
           type="submit"
-          disabled={!confirmed || busy}
-          className="mt-4 press rounded-lg bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+          variant="danger"
+          icon="trash"
+          loading={busy}
+          disabled={!confirmed}
+          className="mt-4"
         >
-          {busy ? 'Suppression…' : 'Supprimer définitivement mon compte'}
-        </button>
+          Supprimer définitivement mon compte
+        </Button>
       </form>
-    </section>
+    </Card>
   )
 }

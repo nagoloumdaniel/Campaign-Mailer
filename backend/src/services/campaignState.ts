@@ -71,12 +71,19 @@ export function canEditContent(status: CampaignStatus): boolean {
 /**
  * Pace, start hour and timezone.
  *
- * Editable whenever the campaign is not actively sending. A running campaign
- * already has its day planned; changing the pace under it would let the
- * campaign exceed the daily cap it was planned against.
+ * Editable in every state but `completed`, a running campaign included. That
+ * was not always so: the pace used to be frozen while sending, on the argument
+ * that a campaign already has its day planned. The argument does not hold —
+ * the planner re-reads these columns on every pass, a quarter of an hour
+ * apart, and the account's 24-hour ceiling is checked against the logs rather
+ * than against the plan, so raising the pace cannot push the account past it.
+ *
+ * What the old rule did cost was the one thing a user with three live
+ * campaigns actually needs: sharing one allowance between them without pausing
+ * all three first. The dashboard's quota advice writes through this.
  */
 export function canEditCadence(status: CampaignStatus): boolean {
-  return status === 'draft' || status === 'scheduled' || status === 'paused'
+  return status !== 'completed'
 }
 
 /**

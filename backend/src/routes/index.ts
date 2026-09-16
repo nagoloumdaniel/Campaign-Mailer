@@ -13,6 +13,7 @@ import { createGoogleTokenRevoker } from '../services/googleRevoke.js'
 import { deleteCampaignFiles } from '../services/storage.js'
 import { createTermsRepository } from '../services/terms.js'
 import { buildUserExport } from '../services/userExport.js'
+import { createHistoryRepository } from '../services/history.js'
 import { createLogExportRepository } from '../services/logExport.js'
 import type { ReadinessReport } from '../services/readiness.js'
 import { createStatsRepository } from '../services/stats.js'
@@ -24,6 +25,7 @@ import { authRouter } from './auth.js'
 import { createCampaignRouter } from './campaigns.js'
 import { createContactRouter } from './contacts.js'
 import { createDashboardRouter } from './dashboard.js'
+import { createHistoryRouter } from './history.js'
 import { createLogExportRouter } from './logExport.js'
 import { createReadyRouter } from './ready.js'
 import { createStatsRouter } from './stats.js'
@@ -81,7 +83,10 @@ export function createApiRouter(deps: ApiRouterDeps = {}): Router {
   // Everything below this line does the work of the service, and waits on the
   // current terms being accepted. The account routes above do not: exporting
   // and deleting one's data are rights.
-  apiRouter.use(['/campaigns', '/dashboard', '/templates'], requireCurrentTerms)
+  apiRouter.use(
+    ['/campaigns', '/dashboard', '/history', '/templates'],
+    requireCurrentTerms,
+  )
 
   const campaignRepository = createCampaignRepository(pool)
 
@@ -93,7 +98,11 @@ export function createApiRouter(deps: ApiRouterDeps = {}): Router {
       audit,
     }),
   )
-  apiRouter.use('/campaigns/:id/attachment', createAttachmentRouter(campaignRepository))
+  apiRouter.use('/campaigns/:id/attachments', createAttachmentRouter(campaignRepository))
+  apiRouter.use(
+    '/history',
+    createHistoryRouter({ history: createHistoryRepository(pool) }),
+  )
   const statsRepository = createStatsRepository(pool)
 
   apiRouter.use(

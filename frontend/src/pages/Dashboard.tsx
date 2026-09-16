@@ -1,32 +1,43 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { StatusBadge } from '@/components/StatusBadge'
-import {
-  campaignsApi,
-  statusLabel,
-  type Campaign,
-  type CampaignStatus,
-} from '@/services/campaigns'
+import { CampaignCard } from '@/components/campaign/CampaignCard'
+import { DeleteCampaignDialog } from '@/components/campaign/DeleteCampaignDialog'
+import { QuotaAdvice } from '@/components/dashboard/QuotaAdvice'
+import { QuotaCard } from '@/components/dashboard/QuotaCard'
+import { StatCard } from '@/components/dashboard/StatCard'
+import { UpcomingSends } from '@/components/dashboard/UpcomingSends'
+import { PageHeader, SectionHeader } from '@/components/layout/PageHeader'
+import { DashboardSkeleton } from '@/components/skeletons/PageSkeletons'
+import { Button, LinkButton } from '@/components/ui/Button'
+import { EmptyState, ErrorState } from '@/components/ui/EmptyState'
+import { campaignsApi, isActive, remainingOf, type Campaign } from '@/services/campaigns'
 import { dashboardApi, type Dashboard as DashboardData } from '@/services/dashboard'
-import { formatNextSend } from '@/services/time'
+import { countOf, formatNumber } from '@/services/format'
+import { campaignsSharingQuota, quotaAdvice } from '@/services/quota'
+import { exportCampaignsCsv } from '@/services/exports'
 
 type Load =
   | { state: 'loading' }
   | { state: 'ready'; campaigns: Campaign[]; dashboard: DashboardData }
   | { state: 'failed' }
 
-/** Statuses in the order a campaign lives through them. */
-const LIFECYCLE: CampaignStatus[] = [
-  'draft',
-  'scheduled',
-  'running',
-  'paused',
-  'completed',
-]
-
+/**
+ * The home page: the whole account in one screen.
+ *
+ * Ordered the way a user actually asks the questions, not the way the data
+ * comes back. How is the account doing, what is about to go out, is anything
+ * in my way, what is running, what is done. The advice panel — when several
+ * campaigns together ask for more than the day allows — sits directly under
+ * the quota it contradicts, because that is the only place where the
+ * contradiction is visible.
+ *
+ * Finished campaigns are folded into a short list at the bottom rather than
+ * mixed in with the live ones. They are a record, not a thing to steer, and
+ * the full history has its own page.
+ */
 export function Dashboard() {
   const [load, setLoad] = useState<Load>({ state: 'loading' })
+  const [toDelete, setToDelete] = useState<Campaign | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -69,231 +80,267 @@ export function Dashboard() {
     }
   }, [sending, refresh])
 
-  return (
-    <>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold tracking-tight">Campagnes</h1>
-        <Link
-          to="/campaigns/new"
-          className="press rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-ink hover:opacity-90"
-        >
-          Nouvelle campagne
-        </Link>
-      </div>
+  const ready = load.state === 'ready' ? load : null
 
-      {load.state === 'loading' && (
-        <p className="mt-6 text-sm text-ink-muted" role="status">
-          Chargement…
-        </p>
-      )}
+  const groups = useMemo(() => {
+    const campaigns = ready?.campaigns ?? []
 
-      {load.state === 'failed' && (
-        <div
-          role="alert"
-          className="mt-6 rounded-xl border border-border px-4 py-3 text-sm"
-        >
-          <p>
-            Impossible de charger vos campagnes. Vérifiez votre connexion, puis réessayez.
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              setLoad({ state: 'loading' })
-              void refresh()
-            }}
-            className="mt-2 text-accent underline"
-          >
-            Réessayer
-          </button>
-        </div>
-      )}
+    return {
+      active: campaigns.filter((campaign) => isActive(campaign.status)),
+      drafts: campaigns.filter((campaign) => campaign.status === 'draft'),
+      completed: campaigns.filter((campaign) => campaign.status === 'completed'),
+    }
+  }, [ready])
 
-      {load.state === 'ready' && (
-        <>
-          <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-            <Allowance account={load.dashboard.account} />
-            <Upcoming upcoming={load.dashboard.upcoming} />
-          </div>
-
-          <CampaignList
-            campaigns={load.campaigns}
-            byStatus={load.dashboard.campaigns.byStatus}
-          />
-        </>
-      )}
-    </>
+  const advice = useMemo(
+    () =>
+      ready ? quotaAdvice(ready.campaigns, ready.dashboard.account.dailyLimit) : null,
+    [ready],
   )
-}
 
-/**
- * The account's 24-hour ceiling, as a meter.
- *
- * The one number on this page that can stop everything else, so it gets the
- * size. The track is a lighter step of the fill's own colour, so the meter
- * reads as a whole bar, and it turns amber only when the ceiling is reached —
- * the moment the user needs to know sending is holding.
- */
-function Allowance({ account }: { account: DashboardData['account'] }) {
-  const used = Math.min(account.sentLast24h, account.dailyLimit)
-  const share = account.dailyLimit > 0 ? used / account.dailyLimit : 0
-  const full = account.remaining === 0
+  if (load.state === 'loading') {
+    return <DashboardSkeleton />
+  }
 
-  return (
-    <section
-      aria-labelledby="allowance-heading"
-      className="rounded-xl border border-border bg-surface-raised px-5 py-4"
-    >
-      <h2 id="allowance-heading" className="text-sm font-medium">
-        Envois sur les dernières 24 heures
-      </h2>
-
-      <p className="mt-3 flex items-baseline gap-2">
-        <span className="text-4xl font-semibold tracking-tight">
-          {account.sentLast24h}
-        </span>
-        <span className="text-sm text-ink-muted">sur {account.dailyLimit} autorisés</span>
-      </p>
-
-      <div
-        role="meter"
-        aria-label="Part du plafond journalier utilisée"
-        aria-valuemin={0}
-        aria-valuemax={account.dailyLimit}
-        aria-valuenow={used}
-        className={`mt-3 h-2 overflow-hidden rounded-full ${full ? 'bg-amber-100' : 'bg-accent/15'}`}
-      >
-        <div
-          // scaleX rather than width, and no radius of its own: the track clips
-          // it, so the rounded ends do not squash as it scales.
-          className={`h-full w-full origin-left transition-transform duration-300 ease-out motion-reduce:transition-none ${full ? 'bg-amber-500' : 'bg-accent'}`}
-          style={{ transform: `scaleX(${String(share)})` }}
-        />
-      </div>
-
-      <p className={`mt-2 text-sm ${full ? 'text-amber-800' : 'text-ink-muted'}`}>
-        {full
-          ? 'Plafond atteint. L’envoi reprend seul à mesure que la fenêtre de 24 heures se libère.'
-          : `Encore ${String(account.remaining)} envoi${account.remaining > 1 ? 's' : ''} possible${account.remaining > 1 ? 's' : ''} avant le plafond.`}
-      </p>
-    </section>
-  )
-}
-
-function Upcoming({ upcoming }: { upcoming: DashboardData['upcoming'] }) {
-  return (
-    <section
-      aria-labelledby="upcoming-heading"
-      className="rounded-xl border border-border bg-surface-raised px-5 py-4"
-    >
-      <h2 id="upcoming-heading" className="text-sm font-medium">
-        Prochains envois
-      </h2>
-
-      {upcoming.length === 0 ? (
-        <p className="mt-3 text-sm text-ink-muted">
-          Aucune campagne en cours. Une campagne lancée apparaît ici avec son prochain
-          envoi.
-        </p>
-      ) : (
-        <ul className="mt-2 divide-y divide-border">
-          {upcoming.map((item) => (
-            <li key={item.campaignId}>
-              <Link
-                to={`/campaigns/${item.campaignId}`}
-                className="-mx-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 rounded-md px-2 py-2.5 hover:bg-surface"
-              >
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                  {item.name}
-                </span>
-                <span className="text-sm tabular-nums">
-                  {item.nextSendAt
-                    ? formatNextSend(new Date(item.nextSendAt))
-                    : 'Rien à envoyer'}
-                </span>
-                <span className="w-full text-xs text-ink-muted">
-                  {item.pending} en attente
-                  {item.estimatedEndAt &&
-                    `, fin estimée ${formatNextSend(new Date(item.estimatedEndAt))}`}
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  )
-}
-
-function CampaignList({
-  campaigns,
-  byStatus,
-}: {
-  campaigns: Campaign[]
-  byStatus: Record<CampaignStatus, number>
-}) {
-  if (campaigns.length === 0) {
+  if (load.state === 'failed') {
     return (
-      <div className="mt-6 rounded-xl border border-dashed border-border px-6 py-12 text-center">
-        <p className="text-sm font-medium">Aucune campagne pour le moment</p>
-        <p className="mx-auto mt-2 max-w-sm text-sm text-ink-muted">
-          Créez-en une pour rédiger votre message, puis importez vos contacts.
-        </p>
-      </div>
+      <>
+        <PageHeader title="Accueil" />
+        <ErrorState
+          title="Impossible de charger votre tableau de bord"
+          onRetry={() => {
+            setLoad({ state: 'loading' })
+            void refresh()
+          }}
+        />
+      </>
     )
   }
 
-  return (
-    <section aria-labelledby="campaigns-heading" className="mt-8">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 id="campaigns-heading" className="text-sm font-medium">
-          Toutes les campagnes{' '}
-          <span className="text-ink-muted tabular-nums">({campaigns.length})</span>
-        </h2>
-        <p className="text-xs text-ink-muted">
-          {LIFECYCLE.filter((status) => byStatus[status] > 0)
-            .map(
-              (status) =>
-                `${String(byStatus[status])} ${statusLabel(status).toLowerCase()}`,
-            )
-            .join(', ')}
-        </p>
-      </div>
-
-      <ul className="mt-3 divide-y divide-border rounded-xl border border-border">
-        {campaigns.map((campaign) => (
-          <li key={campaign.id}>
-            <Link
-              to={`/campaigns/${campaign.id}`}
-              className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 transition-colors hover:bg-surface-raised"
-            >
-              <span className="min-w-0 flex-1 truncate font-medium">{campaign.name}</span>
-              <StatusBadge status={campaign.status} />
-              <Progress campaign={campaign} />
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
+  const { campaigns, dashboard } = load
+  const totals = campaigns.reduce(
+    (sum, campaign) => ({
+      sent: sum.sent + campaign.sentCount,
+      remaining: sum.remaining + remainingOf(campaign),
+    }),
+    { sent: 0, remaining: 0 },
   )
-}
 
-/**
- * Sent, errors and total, in one line.
- *
- * The error count is only rendered when there is one: a permanent "0 erreur"
- * teaches the eye to skip the spot where an error would appear.
- */
-function Progress({ campaign }: { campaign: Campaign }) {
-  if (campaign.totalContacts === 0) {
-    return <span className="text-sm text-ink-muted">Aucun contact</span>
-  }
+  const plannedToday = campaignsSharingQuota(campaigns).reduce(
+    (sum, campaign) => sum + Math.min(campaign.mailsPerDay, remainingOf(campaign)),
+    0,
+  )
 
   return (
-    <span className="text-sm text-ink-muted tabular-nums">
-      {campaign.sentCount} / {campaign.totalContacts} envoyés
-      {campaign.errorCount > 0 && (
-        <span className="text-amber-700">, {campaign.errorCount} en erreur</span>
+    <>
+      <PageHeader
+        title="Accueil"
+        description="Ce que votre compte envoie, ce qu’il lui reste à envoyer, et ce qui part ensuite."
+        action={
+          <>
+            {campaigns.length > 0 && (
+              <Button
+                variant="secondary"
+                icon="download"
+                onClick={() => {
+                  exportCampaignsCsv(campaigns)
+                }}
+              >
+                Exporter
+              </Button>
+            )}
+            <LinkButton to="/campaigns/new" variant="primary" icon="plus">
+              Nouvelle campagne
+            </LinkButton>
+          </>
+        }
+      />
+
+      {campaigns.length === 0 ? (
+        <EmptyState
+          icon="send"
+          title="Aucune campagne pour le moment"
+          description="Créez une campagne pour rédiger votre message, importer vos contacts et lancer les envois depuis votre propre compte Gmail."
+          action={
+            <LinkButton to="/campaigns/new" variant="primary" icon="plus">
+              Créer une campagne
+            </LinkButton>
+          }
+        />
+      ) : (
+        <>
+          <section aria-label="Chiffres du compte">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard
+                index={0}
+                label="Campagnes"
+                value={formatNumber(dashboard.campaigns.total)}
+                icon="send"
+                to="/campaigns"
+                detail={
+                  groups.drafts.length > 0
+                    ? `dont ${countOf(groups.drafts.length, 'brouillon')}`
+                    : undefined
+                }
+              />
+              <StatCard
+                index={1}
+                label="En cours"
+                value={formatNumber(groups.active.length)}
+                icon="play"
+                tone={groups.active.length > 0 ? 'accent' : 'neutral'}
+                detail={
+                  dashboard.upcoming.length > 0
+                    ? `${countOf(dashboard.upcoming.length, 'envoi')} programmé${dashboard.upcoming.length > 1 ? 's' : ''}`
+                    : 'Rien ne part actuellement'
+                }
+              />
+              <StatCard
+                index={2}
+                label="E-mails envoyés"
+                value={formatNumber(totals.sent)}
+                icon="mail"
+                tone={totals.sent > 0 ? 'success' : 'neutral'}
+                detail="Depuis la création du compte"
+              />
+              <StatCard
+                index={3}
+                label="Restants à envoyer"
+                value={formatNumber(totals.remaining)}
+                icon="inbox"
+                detail={
+                  plannedToday > 0
+                    ? `${formatNumber(plannedToday)} prévus aujourd’hui`
+                    : 'Aucun envoi prévu'
+                }
+              />
+            </div>
+          </section>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+            <QuotaCard account={dashboard.account} plannedToday={plannedToday} />
+            <UpcomingSends upcoming={dashboard.upcoming} campaigns={campaigns} />
+          </div>
+
+          {advice && (
+            <div className="mt-4">
+              <QuotaAdvice
+                advice={advice}
+                onApplied={(updated) => {
+                  // Patched in place rather than refetched: the answer is
+                  // already the new campaign, and a reload would blank the
+                  // page under a panel the user is still reading.
+                  setLoad((current) =>
+                    current.state === 'ready'
+                      ? {
+                          ...current,
+                          campaigns: current.campaigns.map(
+                            (campaign) =>
+                              updated.find((row) => row.id === campaign.id) ?? campaign,
+                          ),
+                        }
+                      : current,
+                  )
+                  void refresh()
+                }}
+              />
+            </div>
+          )}
+
+          {groups.active.length > 0 && (
+            <section aria-labelledby="active-heading" className="mt-8">
+              <SectionHeader
+                id="active-heading"
+                title="Campagnes en cours"
+                description="Programmées, en cours d’envoi ou en pause."
+              />
+              <ul className="mt-3 space-y-3">
+                {groups.active.map((campaign, index) => (
+                  <CampaignCard
+                    key={campaign.id}
+                    campaign={campaign}
+                    index={Math.min(index, 8)}
+                    nextSendAt={
+                      dashboard.upcoming.find((item) => item.campaignId === campaign.id)
+                        ?.nextSendAt
+                    }
+                    onDelete={setToDelete}
+                  />
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {groups.drafts.length > 0 && (
+            <section aria-labelledby="drafts-heading" className="mt-8">
+              <SectionHeader
+                id="drafts-heading"
+                title="Brouillons"
+                description="Rien n’est envoyé tant qu’une campagne n’est pas lancée."
+              />
+              <ul className="mt-3 space-y-3">
+                {groups.drafts.map((campaign, index) => (
+                  <CampaignCard
+                    key={campaign.id}
+                    campaign={campaign}
+                    index={Math.min(index, 8)}
+                    onDelete={setToDelete}
+                  />
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {groups.completed.length > 0 && (
+            <section aria-labelledby="completed-heading" className="mt-8">
+              <SectionHeader
+                id="completed-heading"
+                title="Campagnes terminées"
+                description="Le détail de chaque envoi reste consultable dans l’historique."
+                action={
+                  <LinkButton
+                    to="/history"
+                    size="sm"
+                    variant="ghost"
+                    iconAfter="chevron-right"
+                  >
+                    Voir l’historique
+                  </LinkButton>
+                }
+              />
+              <ul className="mt-3 space-y-3">
+                {groups.completed.slice(0, 3).map((campaign, index) => (
+                  <CampaignCard
+                    key={campaign.id}
+                    campaign={campaign}
+                    index={Math.min(index, 8)}
+                    onDelete={setToDelete}
+                  />
+                ))}
+              </ul>
+
+              {groups.completed.length > 3 && (
+                <p className="mt-3 text-center">
+                  <LinkButton to="/campaigns" size="sm" variant="ghost">
+                    Voir les {formatNumber(groups.completed.length)} campagnes terminées
+                  </LinkButton>
+                </p>
+              )}
+            </section>
+          )}
+        </>
       )}
-    </span>
+
+      <DeleteCampaignDialog
+        campaign={toDelete}
+        onClose={() => {
+          setToDelete(null)
+        }}
+        onDeleted={() => {
+          setToDelete(null)
+          void refresh()
+        }}
+      />
+    </>
   )
 }

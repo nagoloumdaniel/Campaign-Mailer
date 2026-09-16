@@ -3,7 +3,11 @@ import { after, before, describe, it } from 'node:test'
 
 import pg from 'pg'
 
-import { createCampaignRepository, type CampaignRepository } from './campaigns.js'
+import {
+  MAX_ATTACHMENTS,
+  createCampaignRepository,
+  type CampaignRepository,
+} from './campaigns.js'
 
 /**
  * The campaign repository's SQL against a real PostgreSQL: the defaults a new
@@ -67,7 +71,7 @@ describe(
         {
           status: 'draft',
           mails_per_day: 46,
-          start_hour: 9,
+          start_hour: 10,
           pause_ms: 30_000,
           timezone: 'Europe/Paris',
           total_contacts: 0,
@@ -109,18 +113,145 @@ describe(
       assert.equal(await campaigns.update(NOBODY, { name: 'Ghost' }), null)
     })
 
-    it('sets and clears the attachment', async () => {
+    it('adds attachments in upload order, and removes one at a time', async () => {
       const created = await campaigns.create(userId, { name: 'Attachment' })
 
-      const attached = await campaigns.setAttachment(created.id, {
-        key: `campaigns/${created.id}/cv.pdf`,
+      const cv = await campaigns.addAttachment(created.id, {
+        object_key: `campaigns/${created.id}/cv.pdf`,
         name: 'CV.pdf',
+        size_bytes: 1024,
+        content_type: 'application/pdf',
       })
-      assert.equal(attached?.attachment_name, 'CV.pdf')
+      await campaigns.addAttachment(created.id, {
+        object_key: `campaigns/${created.id}/lm.pdf`,
+        name: 'Lettre.pdf',
+        size_bytes: 2048,
+        content_type: 'application/pdf',
+      })
 
-      const cleared = await campaigns.setAttachment(created.id, null)
-      assert.equal(cleared?.attachment_key, null)
-      assert.equal(cleared.attachment_name, null)
+      assert.deepEqual(
+        (await campaigns.listAttachments(created.id)).map((file) => file.name),
+        ['CV.pdf', 'Lettre.pdf'],
+      )
+
+      assert.equal(
+        (await campaigns.findAttachment(created.id, cv?.id ?? NOBODY))?.name,
+        'CV.pdf',
+      )
+      // Scoped by campaign: an id of another campaign is simply not found.
+      assert.equal(await campaigns.findAttachment(NOBODY, cv?.id ?? NOBODY), null)
+
+      assert.equal(await campaigns.removeAttachment(created.id, cv?.id ?? NOBODY), true)
+      assert.equal((await campaigns.listAttachments(created.id)).length, 1)
+    })
+
+    it('refuses a sixth attachment rather than growing without a bound', async () => {
+      const created = await campaigns.create(userId, { name: 'Five files' })
+
+      for (let index = 0; index < MAX_ATTACHMENTS; index += 1) {
+        const stored = await campaigns.addAttachment(created.id, {
+          object_key: `campaigns/${created.id}/${String(index)}.pdf`,
+          name: `Fichier ${String(index)}.pdf`,
+          size_bytes: 1024,
+          content_type: 'application/pdf',
+        })
+        assert.ok(stored, 'the cap refused a file below the limit')
+      }
+
+      const refused = await campaigns.addAttachment(created.id, {
+        object_key: `campaigns/${created.id}/six.pdf`,
+        name: 'Sixieme.pdf',
+        size_bytes: 1024,
+        content_type: 'application/pdf',
+      })
+
+      assert.equal(refused, null)
+      assert.equal((await campaigns.listAttachments(created.id)).length, MAX_ATTACHMENTS)
+    })
+
+    it('builds a follow-up from contacts of the user’s own campaigns', async () => {
+      const source = await campaigns.create(userId, { name: 'Source' })
+      const { rows } = await pool.query<{ id: string }>(
+        `INSERT INTO contacts (campaign_id, email, contact_name, company_name, status)
+         VALUES ($1, 'ana@exemple.fr', 'Ana', 'Acme', 'sent'),
+                ($1, 'bob@exemple.fr', 'Bob', 'Globex', 'failed')
+         RETURNING id`,
+        [source.id],
+      )
+      const ids = rows.map((row) => row.id)
+
+      const { campaign, imported } = await campaigns.createFollowUp(userId, {
+        name: 'Relance',
+        type: 'relance',
+        contactIds: ids,
+      })
+
+      assert.equal(imported, 2)
+      assert.equal(campaign.type, 'relance')
+      assert.equal(campaign.status, 'draft')
+      // The counter is written in the same transaction as the copy.
+      assert.equal(campaign.total_contacts, 2)
+
+      const copied = await pool.query<{ email: string; status: string; name: string }>(
+        `SELECT email, status, contact_name AS name FROM contacts
+         WHERE campaign_id = $1 ORDER BY email`,
+        [campaign.id],
+      )
+
+      assert.deepEqual(
+        copied.rows.map((row) => row.email),
+        ['ana@exemple.fr', 'bob@exemple.fr'],
+      )
+      // Copied as pending, whatever happened to them the first time round.
+      assert.ok(copied.rows.every((row) => row.status === 'pending'))
+      assert.equal(copied.rows[0]?.name, 'Ana')
+    })
+
+    it('copies an address named twice only once', async () => {
+      const source = await campaigns.create(userId, { name: 'Twice' })
+      const { rows } = await pool.query<{ id: string }>(
+        `INSERT INTO contacts (campaign_id, email) VALUES ($1, 'same@exemple.fr')
+         RETURNING id`,
+        [source.id],
+      )
+      const id = rows[0]?.id ?? NOBODY
+
+      const { imported } = await campaigns.createFollowUp(userId, {
+        name: 'Relance en double',
+        type: 'relance',
+        contactIds: [id, id],
+      })
+
+      assert.equal(imported, 1)
+    })
+
+    it('copies nothing from a contact that is not the user’s', async () => {
+      // The ids come from a page the user was shown, but the copy is scoped by
+      // owner in SQL rather than trusted: an id from another account selects
+      // nothing at all.
+      const { rows } = await pool.query<{ id: string }>(
+        'INSERT INTO users (google_id, email) VALUES ($1, $2) RETURNING id',
+        [`${googleId}-stranger`, `${googleId}-stranger@example.test`],
+      )
+      const strangerId = rows[0]?.id
+      assert.ok(strangerId)
+
+      const theirs = await campaigns.create(strangerId, { name: 'Leur campagne' })
+      const contact = await pool.query<{ id: string }>(
+        `INSERT INTO contacts (campaign_id, email) VALUES ($1, 'them@exemple.fr')
+         RETURNING id`,
+        [theirs.id],
+      )
+
+      const { imported } = await campaigns.createFollowUp(userId, {
+        name: 'Relance volée',
+        type: 'relance',
+        contactIds: [contact.rows[0]?.id ?? NOBODY],
+      })
+
+      assert.equal(imported, 0)
+
+      await pool.query('DELETE FROM users WHERE id = $1', [strangerId])
     })
 
     it('previews a contact through its own campaign only, and counts the pending ones', async () => {

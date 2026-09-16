@@ -2,13 +2,29 @@ import { api } from './api'
 
 export type CampaignStatus = 'draft' | 'scheduled' | 'running' | 'paused' | 'completed'
 
+/**
+ * What a campaign is for. Mirrors the server enum; it drives no send rule, it
+ * groups the history and tells a follow-up apart from the run it came from.
+ */
+export type CampaignType =
+  'prospection' | 'relance' | 'marketing' | 'alternance' | 'autre'
+
+export interface CampaignAttachment {
+  id: string
+  name: string
+  /** Null for a file stored before sizes were recorded. */
+  size: number | null
+  contentType: string
+  createdAt: string
+}
+
 export interface Campaign {
   id: string
   name: string
+  type: CampaignType
   subject: string | null
   bodyHtml: string | null
   bodyText: string | null
-  attachmentName: string | null
   status: CampaignStatus
   totalContacts: number
   sentCount: number
@@ -22,6 +38,8 @@ export interface Campaign {
   scheduledAt: string | null
   startedAt: string | null
   completedAt: string | null
+  /** Present on a single campaign, not in the list. */
+  attachments?: CampaignAttachment[]
   /** Present on a single campaign, not in the list. */
   sending?: {
     accountSentLast24h: number
@@ -82,10 +100,18 @@ export const campaignsApi = {
 
   create: (input: {
     name: string
+    type?: CampaignType
     subject?: string
     body_html?: string
     body_text?: string
   }) => api.post<{ campaign: Campaign }>('/campaigns', input).then((r) => r.campaign),
+
+  /**
+   * A follow-up built from contacts already written to. The server copies
+   * them, so nothing has to be exported and imported back.
+   */
+  followUp: (input: { name: string; contact_ids: string[]; type?: CampaignType }) =>
+    api.post<{ campaign: Campaign; imported: number }>('/campaigns/follow-up', input),
 
   update: (id: string, patch: Record<string, unknown>) =>
     api.patch<{ campaign: Campaign }>(`/campaigns/${id}`, patch).then((r) => r.campaign),
@@ -162,6 +188,26 @@ export function estimateSchedule(
   return { remaining, days, lastDay, minutesPerDay }
 }
 
+const TYPE_LABELS: Record<CampaignType, string> = {
+  prospection: 'Prospection',
+  relance: 'Relance',
+  marketing: 'Marketing',
+  alternance: 'Alternance / stage',
+  autre: 'Personnalisée',
+}
+
+export const CAMPAIGN_TYPES: CampaignType[] = [
+  'prospection',
+  'relance',
+  'alternance',
+  'marketing',
+  'autre',
+]
+
+export function campaignTypeLabel(type: CampaignType): string {
+  return TYPE_LABELS[type]
+}
+
 const STATUS_LABELS: Record<CampaignStatus, string> = {
   draft: 'Brouillon',
   scheduled: 'Programmée',
@@ -183,9 +229,46 @@ export function isEditable(status: CampaignStatus): boolean {
 }
 
 /**
- * The pace stays editable while the campaign is not actively sending. Mirrors
- * the server rule, so the interface never offers an action the API refuses.
+ * The pace stays editable until the campaign is finished, a running one
+ * included: that is what lets one daily allowance be shared between several
+ * live campaigns without pausing them all first. Mirrors the server rule, so
+ * the interface never offers an action the API refuses.
  */
 export function canEditCadence(status: CampaignStatus): boolean {
-  return status === 'draft' || status === 'scheduled' || status === 'paused'
+  return status !== 'completed'
 }
+
+/** A campaign that has finished, and whose page is a record rather than a desk. */
+export function isFinished(status: CampaignStatus): boolean {
+  return status === 'completed'
+}
+
+/** Scheduled, running or paused: it has left the desk and has work left. */
+export function isActive(status: CampaignStatus): boolean {
+  return status === 'scheduled' || status === 'running' || status === 'paused'
+}
+
+/** What is left to attempt, never negative. */
+export function remainingOf(
+  campaign: Pick<Campaign, 'totalContacts' | 'sentCount' | 'errorCount'>,
+): number {
+  return Math.max(0, campaign.totalContacts - campaign.sentCount - campaign.errorCount)
+}
+
+/**
+ * Office hours, on the campaign's own clock. Mirrors FIRST_SEND_HOUR and
+ * LAST_SEND_HOUR on the server: nothing goes out before 10:00 or after 17:59,
+ * and a campaign launched after the window starts the next morning.
+ */
+export const FIRST_SEND_HOUR = 10
+export const LAST_SEND_HOUR = 17
+
+/**
+ * The window as a person reads it.
+ *
+ * 17 is the last hour a send may *begin*, so the window runs to the end of
+ * that hour. Written out once here rather than computed at each call site as
+ * `LAST_SEND_HOUR + 1`, which read as "jusqu'à 18:00" and made users think
+ * they could choose 18:00 as a start hour.
+ */
+export const SEND_WINDOW_LABEL = '10:00–17:59'

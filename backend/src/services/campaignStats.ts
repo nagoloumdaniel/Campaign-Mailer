@@ -1,5 +1,5 @@
 import type { CampaignStatus } from './campaignState.js'
-import { localHour } from './planner.js'
+import { LAST_SEND_HOUR, localHour } from './planner.js'
 
 /**
  * When a campaign will next send, and when it should finish.
@@ -114,27 +114,47 @@ export function atLocalHour(reference: Date, timezone: string, hour: number): Da
   return new Date(guess - offsetMs(new Date(first), timezone))
 }
 
+/** The next instant the wall clock reads `startHour`, tomorrow at the earliest. */
+function nextMorning(from: Date, timezone: string, startHour: number): Date {
+  return atLocalHour(new Date(from.getTime() + DAY_MS), timezone, startHour)
+}
+
+/**
+ * Moves an instant into the sending window.
+ *
+ * Before the start hour it waits for it the same day; past 17:59 it waits for
+ * the next morning. Mirrors what the planner does, so what the interface
+ * promises and what the worker executes are the same rule read twice.
+ */
+function insideWindow(at: Date, timezone: string, startHour: number): Date {
+  const hour = localHour(at, timezone)
+
+  if (hour < startHour) {
+    return atLocalHour(at, timezone, startHour)
+  }
+
+  return hour > LAST_SEND_HOUR ? nextMorning(at, timezone, startHour) : at
+}
+
 function nextSendAt(input: ScheduleInput): Date {
   const { now, timezone, startHour } = input
 
-  if (localHour(now, timezone) < startHour) {
-    return atLocalHour(now, timezone, startHour)
-  }
-
   if (input.sentLast24h >= input.mailsPerDay && input.oldestSendInWindowAt) {
     // The day's pace is spent. Sending resumes as the oldest send leaves the
-    // window — unless that falls before the start hour, which still holds.
+    // window — held back again if that falls outside the sending hours.
     const frees = new Date(input.oldestSendInWindowAt.getTime() + DAY_MS)
-    return localHour(frees, timezone) < startHour
-      ? atLocalHour(frees, timezone, startHour)
-      : frees
+    return insideWindow(frees, timezone, startHour)
   }
 
   if (input.lastSentAt) {
-    return new Date(Math.max(now.getTime(), input.lastSentAt.getTime() + input.pauseMs))
+    return insideWindow(
+      new Date(Math.max(now.getTime(), input.lastSentAt.getTime() + input.pauseMs)),
+      timezone,
+      startHour,
+    )
   }
 
-  return now
+  return insideWindow(now, timezone, startHour)
 }
 
 export function estimateSchedule(input: ScheduleInput): ScheduleEstimate {

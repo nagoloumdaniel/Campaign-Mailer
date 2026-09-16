@@ -7,9 +7,11 @@ import {
   CADENCE_FIELDS,
   CONTENT_FIELDS,
   createCampaignSchema,
+  followUpSchema,
   previewSchema,
   updateCampaignSchema,
   type CreateCampaignInput,
+  type FollowUpInput,
   type PreviewInput,
   type UpdateCampaignInput,
 } from '../schemas/campaign.js'
@@ -59,18 +61,33 @@ export function createCampaignRouter(
   const paramId = campaignIdParam
 
   /**
-   * A campaign with its account's sending over the last 24 hours.
+   * A campaign with its attachments and its account's sending over the last 24
+   * hours.
    *
-   * Only on single-campaign answers: the list would pay a count per row for
-   * a number nobody reads there.
+   * Only on single-campaign answers: the list would pay two extra queries per
+   * row for numbers nobody reads there.
    */
-  const withSending = async (row: CampaignRow) => ({
-    ...toPublicCampaign(row),
-    sending: {
-      accountSentLast24h: await campaigns.accountSentLast24h(row.user_id),
-      accountDailyLimit: options.accountDailyLimit ?? null,
-    },
-  })
+  const withSending = async (row: CampaignRow) => {
+    const [sentLast24h, attachments] = await Promise.all([
+      campaigns.accountSentLast24h(row.user_id),
+      campaigns.listAttachments(row.id),
+    ])
+
+    return {
+      ...toPublicCampaign(row),
+      attachments: attachments.map((attachment) => ({
+        id: attachment.id,
+        name: attachment.name,
+        size: attachment.size_bytes,
+        contentType: attachment.content_type,
+        createdAt: attachment.created_at.toISOString(),
+      })),
+      sending: {
+        accountSentLast24h: sentLast24h,
+        accountDailyLimit: options.accountDailyLimit ?? null,
+      },
+    }
+  }
 
   router.get('/', (req, res, next) => {
     campaigns
@@ -90,6 +107,37 @@ export function createCampaignRouter(
         res.status(201).json({ campaign: toPublicCampaign(row) })
       })
       .catch(next)
+  })
+
+  /**
+   * A follow-up campaign, built from contacts already written to.
+   *
+   * Declared before `/:id`, or Express would read "follow-up" as a campaign id
+   * and answer 404. The contacts are copied server-side: asking the user to
+   * export the addresses they just selected and import them back would be the
+   * one step this whole page exists to remove.
+   */
+  router.post('/follow-up', validateBody(followUpSchema), (req, res, next) => {
+    void (async () => {
+      const input = req.body as FollowUpInput
+
+      const { campaign, imported } = await campaigns.createFollowUp(userId(req), {
+        name: input.name,
+        type: input.type ?? 'relance',
+        contactIds: input.contact_ids,
+      })
+
+      if (imported === 0) {
+        // Nothing was copied: every id named a contact of somebody else, or one
+        // that has since been deleted. An empty campaign would be a puzzle, so
+        // it is removed and the refusal says what happened.
+        await campaigns.remove(campaign.id)
+        res.status(404).json({ error: 'None of these contacts could be found' })
+        return
+      }
+
+      res.status(201).json({ campaign: toPublicCampaign(campaign), imported })
+    })().catch(next)
   })
 
   router.get('/:id', (req, res, next) => {
@@ -336,10 +384,10 @@ function toPublicCampaign(row: CampaignRow) {
   return {
     id: row.id,
     name: row.name,
+    type: row.type,
     subject: row.subject,
     bodyHtml: row.body_html,
     bodyText: row.body_text,
-    attachmentName: row.attachment_name,
     status: row.status,
     totalContacts: row.total_contacts,
     sentCount: row.sent_count,

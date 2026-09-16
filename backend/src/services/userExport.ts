@@ -29,7 +29,9 @@ export interface ExportedCampaign {
   subject: string | null
   bodyHtml: string | null
   bodyText: string | null
-  attachmentName: string | null
+  type: string
+  /** Every file joined to the campaign's messages, in upload order. */
+  attachmentNames: string[]
   status: string
   mailsPerDay: number
   startHour: number
@@ -83,7 +85,8 @@ export async function buildUserExport(
     subject: string | null
     body_html: string | null
     body_text: string | null
-    attachment_name: string | null
+    type: string
+    attachment_names: string[] | null
     status: string
     mails_per_day: number
     start_hour: number
@@ -93,9 +96,12 @@ export async function buildUserExport(
     started_at: Date | null
     completed_at: Date | null
   }>(
-    `SELECT id, name, subject, body_html, body_text, attachment_name, status,
-            mails_per_day, start_hour, pause_ms, timezone, created_at, started_at, completed_at
-     FROM campaigns WHERE user_id = $1 ORDER BY created_at`,
+    `SELECT c.id, c.name, c.subject, c.body_html, c.body_text, c.type, c.status,
+            c.mails_per_day, c.start_hour, c.pause_ms, c.timezone,
+            c.created_at, c.started_at, c.completed_at,
+            (SELECT array_agg(a.name ORDER BY a.created_at, a.id)
+             FROM campaign_attachments a WHERE a.campaign_id = c.id) AS attachment_names
+     FROM campaigns c WHERE c.user_id = $1 ORDER BY c.created_at`,
     [userId],
   )
 
@@ -177,7 +183,8 @@ export async function buildUserExport(
       subject: row.subject,
       bodyHtml: row.body_html,
       bodyText: row.body_text,
-      attachmentName: row.attachment_name,
+      type: row.type,
+      attachmentNames: row.attachment_names ?? [],
       status: row.status,
       mailsPerDay: row.mails_per_day,
       startHour: row.start_hour,

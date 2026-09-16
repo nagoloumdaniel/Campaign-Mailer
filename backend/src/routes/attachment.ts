@@ -1,6 +1,11 @@
 import express, { Router } from 'express'
 
-import { campaignIdParam, requireAuth, signedInUserId } from '../middleware/auth.js'
+import {
+  campaignIdParam,
+  isUuid,
+  requireAuth,
+  signedInUserId,
+} from '../middleware/auth.js'
 import {
   AttachmentRejected,
   MAX_ATTACHMENT_BYTES,
@@ -9,16 +14,21 @@ import {
   safeFileName,
 } from '../services/attachmentRules.js'
 import { canEditContent } from '../services/campaignState.js'
-import type { CampaignRepository } from '../services/campaigns.js'
+import {
+  MAX_ATTACHMENTS,
+  type CampaignAttachmentRow,
+  type CampaignRepository,
+} from '../services/campaigns.js'
 import { deleteAttachment, getAttachment, putAttachment } from '../services/storage.js'
 
 /**
- * The campaign's attachment: one file, replaced rather than accumulated.
+ * A campaign's attachments: up to five files, added and removed one at a time.
  *
  * The body is the file itself rather than a multipart form. The browser can
  * post a File straight through fetch, so multipart buys nothing here and costs
  * a parser dependency; the filename travels in a header instead.
  */
+
 /**
  * The filename header, decoded, or the default name.
  *
@@ -37,6 +47,17 @@ function decodeFileName(header: string | undefined): string {
   }
 }
 
+/** The shape a client sees. The object key stays server-side. */
+function toPublicAttachment(row: CampaignAttachmentRow) {
+  return {
+    id: row.id,
+    name: row.name,
+    size: row.size_bytes,
+    contentType: row.content_type,
+    createdAt: row.created_at.toISOString(),
+  }
+}
+
 export function createAttachmentRouter(campaigns: CampaignRepository): Router {
   const router = Router({ mergeParams: true })
 
@@ -46,6 +67,30 @@ export function createAttachmentRouter(campaigns: CampaignRepository): Router {
     const id = campaignIdParam(req)
     return id ? campaigns.findForUser(id, signedInUserId(req)) : null
   }
+
+  /** The attachment id from the path, checked before it reaches Postgres. */
+  const attachmentIdParam = (req: { params: unknown }): string | null => {
+    const raw = (req.params as Record<string, unknown>).attachmentId
+    return isUuid(raw) ? raw : null
+  }
+
+  router.get('/', (req, res, next) => {
+    void (async () => {
+      const campaign = await load(req)
+
+      if (!campaign) {
+        res.status(404).json({ error: 'Campaign not found' })
+        return
+      }
+
+      const rows = await campaigns.listAttachments(campaign.id)
+
+      res.json({
+        attachments: rows.map(toPublicAttachment),
+        max: MAX_ATTACHMENTS,
+      })
+    })().catch(next)
+  })
 
   router.post(
     '/',
@@ -63,7 +108,17 @@ export function createAttachmentRouter(campaigns: CampaignRepository): Router {
 
         if (!canEditContent(campaign.status)) {
           res.status(409).json({
-            error: 'The attachment can no longer change once the campaign is scheduled',
+            error: 'The attachments can no longer change once the campaign is scheduled',
+          })
+          return
+        }
+
+        // Checked before the upload as well as inside the insert. The insert is
+        // what actually holds the cap against two uploads racing; this only
+        // spares the bucket a write it would then have to undo.
+        if ((await campaigns.listAttachments(campaign.id)).length >= MAX_ATTACHMENTS) {
+          res.status(409).json({
+            error: `A campaign carries ${String(MAX_ATTACHMENTS)} attachments at most`,
           })
           return
         }
@@ -89,50 +144,52 @@ export function createAttachmentRouter(campaigns: CampaignRepository): Router {
           throw err
         }
 
-        const previousKey = campaign.attachment_key
+        const row = await campaigns.addAttachment(campaign.id, {
+          object_key: stored.key,
+          name: stored.name,
+          size_bytes: stored.size,
+          content_type: stored.contentType,
+        })
 
-        await campaigns.setAttachment(campaign.id, { key: stored.key, name: stored.name })
-
-        // Only once the new one is recorded. Deleting first would leave the
-        // campaign pointing at nothing if the upload failed.
-        if (previousKey) {
-          await deleteAttachment(previousKey).catch((err: unknown) => {
-            // The campaign is already correct; an orphan object costs storage,
-            // not correctness.
+        if (!row) {
+          // The cap was reached between the check and the insert. The object is
+          // already in the bucket, so it is removed rather than left orphaned.
+          await deleteAttachment(stored.key).catch((err: unknown) => {
             req.log.warn(
               { err, campaignId: campaign.id },
-              'Could not delete the replaced attachment',
+              'Could not delete an attachment refused by the cap',
             )
           })
+
+          res.status(409).json({
+            error: `A campaign carries ${String(MAX_ATTACHMENTS)} attachments at most`,
+          })
+          return
         }
 
-        res.status(201).json({
-          attachment: {
-            name: stored.name,
-            size: stored.size,
-            contentType: stored.contentType,
-          },
-        })
+        res.status(201).json({ attachment: toPublicAttachment(row) })
       })().catch(next)
     },
   )
 
-  router.get('/', (req, res, next) => {
+  router.get('/:attachmentId', (req, res, next) => {
     void (async () => {
       const campaign = await load(req)
+      const attachmentId = attachmentIdParam(req)
+      const row =
+        campaign && attachmentId
+          ? await campaigns.findAttachment(campaign.id, attachmentId)
+          : null
 
-      if (!campaign?.attachment_key) {
+      if (!row) {
         res.status(404).json({ error: 'No attachment' })
         return
       }
 
-      const body = await getAttachment(campaign.attachment_key)
+      const body = await getAttachment(row.object_key)
       // The extension from the stored key, not a fixed "pdf": a Word document
       // used to download named .pdf and open as a broken file.
-      const name = safeFileName(
-        campaign.attachment_name ?? 'piece-jointe',
-        extensionOfKey(campaign.attachment_key),
-      )
+      const name = safeFileName(row.name, extensionOfKey(row.object_key))
 
       // attachment, not inline: a PDF rendered in the tab would run in this
       // origin.
@@ -142,7 +199,7 @@ export function createAttachmentRouter(campaigns: CampaignRepository): Router {
     })().catch(next)
   })
 
-  router.delete('/', (req, res, next) => {
+  router.delete('/:attachmentId', (req, res, next) => {
     void (async () => {
       const campaign = await load(req)
 
@@ -153,20 +210,33 @@ export function createAttachmentRouter(campaigns: CampaignRepository): Router {
 
       if (!canEditContent(campaign.status)) {
         res.status(409).json({
-          error: 'The attachment can no longer change once the campaign is scheduled',
+          error: 'The attachments can no longer change once the campaign is scheduled',
         })
         return
       }
 
-      if (campaign.attachment_key) {
-        await campaigns.setAttachment(campaign.id, null)
-        await deleteAttachment(campaign.attachment_key).catch((err: unknown) => {
-          req.log.warn(
-            { err, campaignId: campaign.id },
-            'Could not delete the attachment object',
-          )
-        })
+      const attachmentId = attachmentIdParam(req)
+      const row = attachmentId
+        ? await campaigns.findAttachment(campaign.id, attachmentId)
+        : null
+
+      if (!row) {
+        res.status(404).json({ error: 'No attachment' })
+        return
       }
+
+      await campaigns.removeAttachment(campaign.id, row.id)
+
+      // Only once the row is gone. Deleting the object first would leave the
+      // campaign pointing at nothing if the delete below failed.
+      await deleteAttachment(row.object_key).catch((err: unknown) => {
+        // The campaign is already correct; an orphan object costs storage,
+        // not correctness.
+        req.log.warn(
+          { err, campaignId: campaign.id },
+          'Could not delete the attachment object',
+        )
+      })
 
       res.status(204).end()
     })().catch(next)

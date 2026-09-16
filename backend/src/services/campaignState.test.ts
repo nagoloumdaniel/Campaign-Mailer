@@ -106,16 +106,17 @@ describe('canEditContent', () => {
 })
 
 describe('canEditCadence', () => {
-  it('allows a campaign that is not sending right now', () => {
-    for (const status of ['draft', 'scheduled', 'paused'] as const) {
+  it('allows every state a campaign can still send from', () => {
+    for (const status of ['draft', 'scheduled', 'paused', 'running'] as const) {
       assert.equal(canEditCadence(status), true, status)
     }
   })
 
-  it('refuses a running campaign', () => {
-    // The day's sends are already planned. Changing the pace under them would
-    // let the campaign exceed the daily cap it was planned against.
-    assert.equal(canEditCadence('running'), false)
+  it('allows a running campaign, so one allowance can be shared between several', () => {
+    // The planner re-reads the pace on every pass and the account ceiling is
+    // checked against the logs, not against the plan, so raising it here
+    // cannot push the account past its 24-hour limit.
+    assert.equal(canEditCadence('running'), true)
   })
 
   it('refuses a completed campaign', () => {

@@ -74,12 +74,20 @@ const engine: SendEngineDeps = {
 }
 
 /**
- * Half past eight UTC today: inside the default sending hours in Paris, winter
- * and summer, so a run at night does not find the campaign waiting for morning.
+ * Noon UTC today.
+ *
+ * Sending only happens between 10:00 and 17:59 on the campaign's own clock,
+ * and this suite runs whenever a developer runs it. Pinning the planner's
+ * clock to the middle of the window is what lets a journey started at
+ * midnight still send: noon UTC is 13:00 in Paris in winter and 14:00 in
+ * summer, both comfortably inside, and UTC itself is inside too.
+ *
+ * Only the planner's clock is pinned. Which contacts it picks, how many, and
+ * the ceiling it checks them against are all the real rules.
  */
 function sendingHour(): Date {
   const at = new Date()
-  at.setUTCHours(8, 30, 0, 0)
+  at.setUTCHours(12, 0, 0, 0)
   return at
 }
 

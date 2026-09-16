@@ -1,6 +1,6 @@
 import type { Pool } from 'pg'
 
-import { localHour, planDay, type PlanOutcome } from './planner.js'
+import { LAST_SEND_HOUR, localHour, planDay, type PlanOutcome } from './planner.js'
 import { CLAIM_TIMEOUT, completeIfDone, countSentToday } from './sendEngine.js'
 
 /**
@@ -70,10 +70,19 @@ export async function dispatchCampaign(
     return { kind: 'not_dispatchable' }
   }
 
-  if (localHour(now, campaign.timezone) < campaign.start_hour) {
+  const hour = localHour(now, campaign.timezone)
+
+  if (hour < campaign.start_hour) {
     // A scheduled campaign waits for its first morning in the user's zone; a
     // running one waits for the next.
     return { kind: 'before_start_hour' }
+  }
+
+  // Checked before the campaign is moved to running, so a campaign launched at
+  // half past six in the evening still reads as "programmée" until it actually
+  // has something to send the next morning.
+  if (hour > LAST_SEND_HOUR) {
+    return { kind: 'after_send_window' }
   }
 
   if (campaign.status === 'scheduled') {

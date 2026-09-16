@@ -1,11 +1,12 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RouterProvider } from 'react-router-dom'
-import { Toaster } from 'sonner'
 
 import { AuthProvider } from '@/auth/AuthProvider'
+import { Toasts } from '@/components/ui/Toasts'
 import { router } from '@/router'
 import { initErrorReporting, onReactError } from '@/services/errorReporting'
+import { ThemeProvider } from '@/theme/ThemeProvider'
 
 import './index.css'
 
@@ -25,14 +26,13 @@ createRoot(container, {
   onRecoverableError: onReactError,
 }).render(
   <StrictMode>
-    <AuthProvider>
-      <RouterProvider router={router} />
-      {/*
-        Feedback that does not take the page hostage. An import reporting
-        "412 imported, 3 rejected" belongs beside the work, not behind an OK
-        button that has to be dismissed before the report can be read.
-      */}
-      <Toaster position="bottom-right" closeButton richColors />
-    </AuthProvider>
+    {/* Outermost, so the toasts and any error surface rendered above the
+        router already know which theme they are in. */}
+    <ThemeProvider>
+      <AuthProvider>
+        <RouterProvider router={router} />
+        <Toasts />
+      </AuthProvider>
+    </ThemeProvider>
   </StrictMode>,
 )

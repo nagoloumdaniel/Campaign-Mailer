@@ -10,19 +10,20 @@ import MailComposer from 'nodemailer/lib/mail-composer/index.js'
  * somebody's inbox, and only in some clients.
  */
 
+export interface MessageAttachment {
+  filename: string
+  content: Buffer
+  contentType: string
+}
+
 export interface MessageInput {
   from: { name?: string | undefined; address: string }
   to: string
   subject: string
   text: string
   html: string
-  attachment?:
-    | {
-        filename: string
-        content: Buffer
-        contentType: string
-      }
-    | undefined
+  /** In the order the user uploaded them. Absent or empty means no attachment part. */
+  attachments?: readonly MessageAttachment[] | undefined
 }
 
 /**
@@ -70,15 +71,13 @@ export async function buildMimeMessage(input: MessageInput): Promise<Buffer> {
     // Both parts, always. A message with only HTML is scored as less
     // trustworthy by most filters, and unreadable in a client set to plain
     // text.
-    ...(input.attachment
+    ...(input.attachments && input.attachments.length > 0
       ? {
-          attachments: [
-            {
-              filename: input.attachment.filename,
-              content: input.attachment.content,
-              contentType: input.attachment.contentType,
-            },
-          ],
+          attachments: input.attachments.map((attachment) => ({
+            filename: attachment.filename,
+            content: attachment.content,
+            contentType: attachment.contentType,
+          })),
         }
       : {}),
   })

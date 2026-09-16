@@ -2,12 +2,15 @@ import { useState } from 'react'
 
 import { useAuth } from '@/auth/useAuth'
 
+import { Logo } from './layout/Logo'
+import { Button } from './ui/Button'
+
 /**
  * Shown when the session could not be read because the API did not answer.
  *
  * Deliberately not the login page. "Sign in" is advice the user cannot act on
- * while the server is down, and it makes them suspect their own account rather
- * than the service.
+ * while the server is down, and it makes them suspect their own account
+ * rather than the service.
  */
 export function ServerUnreachable() {
   const { refresh } = useAuth()
@@ -16,27 +19,31 @@ export function ServerUnreachable() {
   return (
     <main
       role="alert"
-      className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-4 text-center"
+      className="mx-auto flex min-h-dvh max-w-sm flex-col items-center justify-center px-5 text-center"
     >
-      <h1 className="text-lg font-semibold tracking-tight">Serveur injoignable</h1>
-      <p className="mt-2 text-sm text-ink-muted">
+      <Logo size={30} className="text-ink-subtle" />
+
+      <h1 className="mt-5 text-lg font-semibold tracking-tight">Serveur injoignable</h1>
+
+      <p className="mt-2 text-[13px] leading-relaxed text-ink-muted">
         Impossible de vérifier votre session. Le service est peut-être momentanément
-        indisponible.
+        indisponible, ou votre connexion est interrompue.
       </p>
 
-      <button
-        type="button"
-        disabled={retrying}
+      <Button
+        variant="secondary"
+        icon="refresh"
+        loading={retrying}
+        className="mt-6"
         onClick={() => {
           setRetrying(true)
           void refresh().finally(() => {
             setRetrying(false)
           })
         }}
-        className="mx-auto mt-6 rounded-lg border border-border bg-surface-raised px-4 py-2 text-sm font-medium transition-colors hover:bg-surface disabled:opacity-60"
       >
-        {retrying ? 'Nouvelle tentative…' : 'Réessayer'}
-      </button>
+        Réessayer
+      </Button>
     </main>
   )
 }

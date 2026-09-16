@@ -138,6 +138,21 @@ function engine(
   }
 }
 
+/**
+ * Noon UTC today.
+ *
+ * Sending only happens between 10:00 and 17:59 on the campaign's own clock —
+ * UTC for this fixture — and this suite runs whenever somebody runs it.
+ * Pinning the planner's clock to the middle of the window is what keeps these
+ * tests about the pipeline rather than about the hour of the day. The two
+ * cases that are about the hour pass their own instant.
+ */
+function noonUtc(): Date {
+  const at = new Date()
+  at.setUTCHours(12, 0, 0, 0)
+  return at
+}
+
 async function plan(
   queue: FakeQueue,
   overrides: { accountLimit?: number; now?: Date } = {},
@@ -149,7 +164,7 @@ async function plan(
       pool,
       accountLimit: overrides.accountLimit ?? 1500,
       enqueueSend: queue.enqueue,
-      ...(now ? { now: () => now } : {}),
+      now: () => now ?? noonUtc(),
       random: () => 0,
     },
     campaignId,
@@ -259,7 +274,7 @@ beforeEach(async () => {
     `INSERT INTO campaigns (user_id, name, status, subject, body_html, body_text,
                             mails_per_day, start_hour, timezone)
      VALUES ($1, 'Pipeline', 'running', 'Bonjour {{contact_name|}}', '<p>Bonjour</p>', 'Bonjour',
-             450, 0, 'UTC')
+             450, 10, 'UTC')
      RETURNING id`,
     [userId],
   )
@@ -482,22 +497,45 @@ describe(
     it('waits for the start hour in the campaign’s zone, then starts', async () => {
       await addContacts(3)
       await pool.query(
-        "UPDATE campaigns SET status = 'scheduled', start_hour = 9 WHERE id = $1",
+        "UPDATE campaigns SET status = 'scheduled', start_hour = 14 WHERE id = $1",
         [campaignId],
       )
       const queue = new FakeQueue()
 
-      assert.deepEqual(await plan(queue, { now: new Date('2026-07-01T05:00:00Z') }), {
+      assert.deepEqual(await plan(queue, { now: new Date('2026-07-01T10:00:00Z') }), {
         kind: 'before_start_hour',
       })
       assert.equal((await campaignRow()).status, 'scheduled')
       assert.equal(queue.added, 0)
 
       assert.equal(
-        (await plan(queue, { now: new Date('2026-07-01T09:00:00Z') })).kind,
+        (await plan(queue, { now: new Date('2026-07-01T15:00:00Z') })).kind,
         'planned',
       )
       assert.equal((await campaignRow()).status, 'running')
+      assert.equal(queue.added, 3)
+    })
+
+    it('queues nothing once the sending window has closed', async () => {
+      await addContacts(3)
+      await pool.query("UPDATE campaigns SET status = 'scheduled' WHERE id = $1", [
+        campaignId,
+      ])
+      const queue = new FakeQueue()
+
+      // 18:30 UTC, past the last hour a send may begin. A campaign launched
+      // in the evening starts the next morning; nothing goes out tonight, and
+      // it is still only scheduled.
+      assert.deepEqual(await plan(queue, { now: new Date('2026-07-01T18:30:00Z') }), {
+        kind: 'after_send_window',
+      })
+      assert.equal((await campaignRow()).status, 'scheduled')
+      assert.equal(queue.added, 0)
+
+      assert.equal(
+        (await plan(queue, { now: new Date('2026-07-02T10:30:00Z') })).kind,
+        'planned',
+      )
       assert.equal(queue.added, 3)
     })
   },

@@ -6,6 +6,7 @@ import express from 'express'
 
 import type { CampaignStatus } from '../services/campaignState.js'
 import type {
+  CampaignAttachmentRow,
   CampaignPatch,
   CampaignRepository,
   CampaignRow,
@@ -40,11 +41,10 @@ function defaults(): CampaignRow {
     id: CAMPAIGN,
     user_id: ALICE,
     name: 'Candidatures',
+    type: 'autre',
     subject: null,
     body_html: null,
     body_text: null,
-    attachment_key: null,
-    attachment_name: null,
     status: 'draft',
     total_contacts: 0,
     sent_count: 0,
@@ -72,6 +72,14 @@ let dispatchFails = false
 /** Simulates another request moving the campaign between the read and the update. */
 let raceLost = false
 let audited: string[] = []
+let attachments: CampaignAttachmentRow[] = []
+let followUpImported = 2
+let followedUp: {
+  userId: string
+  name: string
+  type: string
+  contactIds: readonly string[]
+} | null = null
 
 const repository: CampaignRepository = {
   belongsTo: () => Promise.resolve(true),
@@ -98,16 +106,18 @@ const repository: CampaignRepository = {
   },
   countPendingContacts: () => Promise.resolve(pendingContacts),
   accountSentLast24h: () => Promise.resolve(accountSent),
-  setAttachment: (_campaignId, attachment) =>
-    Promise.resolve(
-      stored
-        ? row({
-            ...stored,
-            attachment_key: attachment?.key ?? null,
-            attachment_name: attachment?.name ?? null,
-          })
-        : null,
-    ),
+  listAttachments: () => Promise.resolve(attachments),
+  findAttachment: (_campaignId, attachmentId) =>
+    Promise.resolve(attachments.find((file) => file.id === attachmentId) ?? null),
+  addAttachment: () => Promise.resolve(attachments[0] ?? null),
+  removeAttachment: () => Promise.resolve(true),
+  createFollowUp: (userId, input) => {
+    followedUp = { userId, ...input }
+    return Promise.resolve({
+      campaign: row({ name: input.name, type: input.type }),
+      imported: followUpImported,
+    })
+  },
   findContact: (campaignId, contactId) =>
     Promise.resolve(
       campaignId === CAMPAIGN && contactId === CONTACT
@@ -183,6 +193,58 @@ beforeEach(() => {
   dispatchFails = false
   raceLost = false
   audited = []
+  attachments = []
+  followUpImported = 2
+  followedUp = null
+})
+
+describe('a follow-up campaign', () => {
+  const CONTACT_A = '11111111-1111-4111-8111-111111111111'
+  const CONTACT_B = '22222222-2222-4222-8222-222222222222'
+
+  it('copies the selected contacts and files the campaign under relance', async () => {
+    const response = await send('/campaigns/follow-up', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'Relance septembre',
+        contact_ids: [CONTACT_A, CONTACT_B],
+      }),
+    })
+
+    assert.equal(response.status, 201)
+
+    const body = (await response.json()) as {
+      campaign: { name: string; type: string }
+      imported: number
+    }
+
+    assert.equal(body.campaign.type, 'relance')
+    assert.equal(body.imported, 2)
+    assert.ok(followedUp, 'the repository should have been asked to copy the contacts')
+    assert.deepEqual(followedUp.contactIds, [CONTACT_A, CONTACT_B])
+    assert.equal(followedUp.userId, ALICE)
+  })
+
+  it('refuses a selection that copied nothing, and leaves no empty campaign behind', async () => {
+    followUpImported = 0
+
+    const response = await send('/campaigns/follow-up', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Relance', contact_ids: [CONTACT_A] }),
+    })
+
+    assert.equal(response.status, 404)
+    assert.equal(removed, true)
+  })
+
+  it('refuses an empty selection', async () => {
+    const response = await send('/campaigns/follow-up', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Relance', contact_ids: [] }),
+    })
+
+    assert.equal(response.status, 400)
+  })
 })
 
 const send = (path: string, init: RequestInit = {}) =>
@@ -332,10 +394,17 @@ describe('PATCH /campaigns/:id', () => {
     assert.equal((await patchWith({ mails_per_day: 20 })).status, 200)
   })
 
-  it('refuses to change the pace of a running campaign', async () => {
-    // Its day is already planned; a new pace under it could exceed the cap
-    // the campaign was planned against.
+  it('allows changing the pace of a running campaign', async () => {
+    // What the dashboard's quota advice writes through. The planner re-reads
+    // the pace on its next pass, and the account ceiling is counted from the
+    // logs, so a raise here cannot push the account past its 24-hour limit.
     stored = row({ status: 'running' })
+
+    assert.equal((await patchWith({ mails_per_day: 200 })).status, 200)
+  })
+
+  it('refuses to change the pace of a completed campaign', async () => {
+    stored = row({ status: 'completed' })
 
     assert.equal((await patchWith({ mails_per_day: 200 })).status, 409)
   })

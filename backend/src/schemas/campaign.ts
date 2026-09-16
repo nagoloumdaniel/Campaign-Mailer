@@ -80,12 +80,37 @@ const timezone = z
   .max(64)
   .refine(isTimeZone, { message: 'Unknown time zone' })
 
+/**
+ * Office hours, on the campaign's own clock.
+ *
+ * Nothing goes out before 10:00 or after 17:59. The rule is about how the
+ * message is received, not about Gmail's limits: a candidature that lands at
+ * three in the morning reads as automated. `LAST` is the last hour a send may
+ * *begin*, so the window closes at the end of that hour.
+ */
+export const FIRST_SEND_HOUR = 10
+export const LAST_SEND_HOUR = 17
+
 const cadence = {
   mails_per_day: z.number().int().min(MIN_MAILS_PER_DAY).max(MAX_MAILS_PER_DAY),
-  start_hour: z.number().int().min(0).max(23),
+  start_hour: z.number().int().min(FIRST_SEND_HOUR).max(LAST_SEND_HOUR),
   pause_ms: z.number().int().min(MIN_PAUSE_MS).max(MAX_PAUSE_MS),
   timezone,
 }
+
+/**
+ * What a campaign is for. Drives no send rule; it groups the history and tells
+ * a follow-up apart from the run it came from.
+ */
+export const CAMPAIGN_TYPES = [
+  'prospection',
+  'relance',
+  'marketing',
+  'alternance',
+  'autre',
+] as const
+
+export type CampaignType = (typeof CAMPAIGN_TYPES)[number]
 
 const content = {
   // Trimmed before length is judged, so a name of spaces is empty, not valid.
@@ -98,6 +123,7 @@ const content = {
 export const createCampaignSchema = z
   .object({
     name: content.name,
+    type: z.enum(CAMPAIGN_TYPES).optional(),
     subject: content.subject.optional(),
     body_html: content.body_html.optional(),
     body_text: content.body_text.optional(),
@@ -120,7 +146,14 @@ export const updateCampaignSchema = createCampaignSchema
     message: 'No field to update',
   })
 
-/** Which of a payload's fields are content, and which are cadence. */
+/**
+ * Which of a payload's fields are content, and which are cadence.
+ *
+ * `type` is in neither on purpose: it is a label on the campaign, not part of
+ * the message or of the pace, so it stays editable in every state. Filing a
+ * finished run under the right category is exactly the sort of tidying a user
+ * does afterwards.
+ */
 export const CONTENT_FIELDS = ['name', 'subject', 'body_html', 'body_text'] as const
 export const CADENCE_FIELDS = [
   'mails_per_day',
@@ -149,3 +182,20 @@ export const previewSchema = z
   .strict()
 
 export type PreviewInput = z.infer<typeof previewSchema>
+
+/**
+ * A follow-up campaign, built from contacts already written to.
+ *
+ * The ids come from the history, so they point at contacts of the user's own
+ * campaigns; the route checks that ownership rather than trusting it. The cap
+ * is the import batch limit: a larger selection is an import, not a follow-up.
+ */
+export const followUpSchema = z
+  .object({
+    name: content.name,
+    contact_ids: z.array(z.uuid()).min(1).max(2000),
+    type: z.enum(CAMPAIGN_TYPES).optional(),
+  })
+  .strict()
+
+export type FollowUpInput = z.infer<typeof followUpSchema>

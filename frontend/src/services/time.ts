@@ -46,3 +46,22 @@ export function formatNextSend(at: Date, now: Date = new Date()): string {
 
   return `le ${DAY_AND_TIME.format(at)}`
 }
+
+const DAY_AND_HOUR = new Intl.DateTimeFormat('fr-FR', {
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
+/**
+ * The calendar day and hour, beside the relative time rather than instead of
+ * it.
+ *
+ * "dans 12 min" is what a person wants at a glance; it stops being useful the
+ * moment the answer is "demain", and then the date is what they act on.
+ */
+export function formatSendDay(at: Date, now: Date = new Date()): string {
+  return sameDay(at, now) ? TIME.format(at) : DAY_AND_HOUR.format(at)
+}

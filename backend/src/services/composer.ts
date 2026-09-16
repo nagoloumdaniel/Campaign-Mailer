@@ -29,9 +29,12 @@ interface MessageSource {
   subject: string | null
   body_html: string | null
   body_text: string | null
-  attachment_key: string | null
-  attachment_name: string | null
   sender: string
+}
+
+interface AttachmentSource {
+  object_key: string
+  name: string
 }
 
 /**
@@ -54,8 +57,7 @@ export function createComposer(deps: ComposerDeps) {
     contact: SendableContact,
   ): Promise<{ raw: string; to: string }> {
     const { rows } = await deps.pool.query<MessageSource>(
-      `SELECT c.subject, c.body_html, c.body_text, c.attachment_key, c.attachment_name,
-              u.email AS sender
+      `SELECT c.subject, c.body_html, c.body_text, u.email AS sender
        FROM campaigns c
        JOIN users u ON u.id = c.user_id
        WHERE c.id = $1`,
@@ -77,6 +79,22 @@ export function createComposer(deps: ComposerDeps) {
       salutation: contact.salutation,
     }
 
+    // Read in upload order, so the CV stays ahead of the cover letter in every
+    // message of the campaign.
+    const { rows: files } = await deps.pool.query<AttachmentSource>(
+      `SELECT object_key, name FROM campaign_attachments
+       WHERE campaign_id = $1 ORDER BY created_at, id`,
+      [contact.campaign_id],
+    )
+
+    const attachments = await Promise.all(
+      files.map(async (file) => ({
+        filename: file.name,
+        content: await deps.readAttachment(file.object_key),
+        contentType: contentTypeOfKey(file.object_key),
+      })),
+    )
+
     const mime = await buildMimeMessage({
       from: { address: source.sender },
       to: contact.email,
@@ -84,13 +102,7 @@ export function createComposer(deps: ComposerDeps) {
       subject: renderText(source.subject, merge),
       html: renderHtml(source.body_html, merge),
       text: renderText(source.body_text ?? '', merge),
-      attachment: source.attachment_key
-        ? {
-            filename: source.attachment_name ?? 'piece-jointe',
-            content: await deps.readAttachment(source.attachment_key),
-            contentType: contentTypeOfKey(source.attachment_key),
-          }
-        : undefined,
+      attachments,
     })
 
     return { raw: toGmailRaw(mime), to: contact.email }

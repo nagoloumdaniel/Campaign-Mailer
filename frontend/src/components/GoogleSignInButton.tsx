@@ -21,7 +21,7 @@ export function GoogleSignInButton() {
         setLeaving(true)
       }}
       aria-disabled={leaving}
-      className="inline-flex w-full items-center justify-center gap-3 rounded-lg border border-border bg-surface-raised px-4 py-2.5 text-sm font-medium shadow-xs transition-colors hover:bg-surface aria-disabled:pointer-events-none aria-disabled:opacity-60"
+      className="bg-surface-raised inline-flex w-full items-center justify-center gap-3 rounded-lg border border-border px-4 py-2.5 text-sm font-medium shadow-xs transition-colors hover:bg-surface aria-disabled:pointer-events-none aria-disabled:opacity-60"
     >
       <GoogleMark />
       {leaving ? 'Redirection vers Google…' : 'Continuer avec Google'}

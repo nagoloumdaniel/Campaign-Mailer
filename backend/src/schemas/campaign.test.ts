@@ -48,9 +48,12 @@ describe('createCampaignSchema', () => {
       ['mails_per_day at 0', { mails_per_day: 0 }, false],
       ['mails_per_day at 451', { mails_per_day: 451 }, false],
       ['mails_per_day fractional', { mails_per_day: 1.5 }, false],
-      ['start_hour at 0', { start_hour: 0 }, true],
-      ['start_hour at 23', { start_hour: 23 }, true],
-      ['start_hour at 24', { start_hour: 24 }, false],
+      // Office hours only: nothing is sent before 10:00 or after 17:59.
+      ['start_hour at 10', { start_hour: 10 }, true],
+      ['start_hour at 17', { start_hour: 17 }, true],
+      ['start_hour at 9', { start_hour: 9 }, false],
+      ['start_hour at 18', { start_hour: 18 }, false],
+      ['start_hour at 0', { start_hour: 0 }, false],
       ['start_hour negative', { start_hour: -1 }, false],
       ['pause_ms at 10000', { pause_ms: 10_000 }, true],
       ['pause_ms at 9999', { pause_ms: 9_999 }, false],
@@ -120,7 +123,7 @@ describe('createCampaignSchema', () => {
 
 describe('updateCampaignSchema', () => {
   it('accepts a single field', () => {
-    assert.equal(updateCampaignSchema.safeParse({ start_hour: 8 }).success, true)
+    assert.equal(updateCampaignSchema.safeParse({ start_hour: 14 }).success, true)
   })
 
   it('refuses an empty payload', () => {
@@ -129,7 +132,7 @@ describe('updateCampaignSchema', () => {
   })
 
   it('applies the same bounds as creation', () => {
-    assert.equal(updateCampaignSchema.safeParse({ start_hour: 24 }).success, false)
+    assert.equal(updateCampaignSchema.safeParse({ start_hour: 18 }).success, false)
   })
 })
 

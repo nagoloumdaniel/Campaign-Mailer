@@ -5,6 +5,12 @@ import { API_URL } from './playwright.config'
 /**
  * The journey the product exists for: sign in, prepare a campaign, import the
  * contacts, launch, and follow it until every message has gone.
+ *
+ * Playwright's locators are strict, and this interface gives them two ways to
+ * be ambiguous. Several panels say "Enregistrer" or "À jour", so those are
+ * matched exactly and taken first; and three file inputs live on the campaign
+ * page — the attachments, the CSV import, and the import's own dialog — so
+ * every file is set through the dialog that owns it.
  */
 
 const CSV = [
@@ -36,7 +42,7 @@ test('a user prepares a campaign, launches it and follows it to the end', async 
   })
 
   await test.step('creates a campaign and writes its message', async () => {
-    await page.getByRole('link', { name: 'Nouvelle campagne' }).click()
+    await page.getByRole('link', { name: 'Nouvelle campagne' }).first().click()
     await page.getByLabel('Nom de la campagne').fill('Candidatures E2E')
     await page.getByRole('button', { name: 'Créer la campagne' }).click()
 
@@ -44,35 +50,64 @@ test('a user prepares a campaign, launches it and follows it to the end', async 
       page.getByRole('heading', { level: 1, name: 'Candidatures E2E' }),
     ).toBeVisible()
 
+    // The editor is loaded on demand; the field only exists once it arrives.
     await page.getByLabel('Objet').fill('Candidature chez {{company_name|votre équipe}}')
     await page.locator('.ql-editor').fill('Bonjour {{contact_name|Madame, Monsieur}},')
-    // Exact: the cadence form below has "Enregistrer le rythme".
+
+    // Exact: the cadence panel below has "Enregistrer le rythme".
     await page.getByRole('button', { name: 'Enregistrer', exact: true }).click()
-    await expect(page.getByText('À jour')).toBeVisible()
+    // Said in two places once saved — the header button and the cadence note.
+    await expect(page.getByText('À jour').first()).toBeVisible()
+  })
+
+  await test.step('the preview renders the message without being asked', async () => {
+    const preview = page.getByRole('region', { name: 'Aperçu' })
+
+    // No contact yet, so the sample values stand in for a real one.
+    await expect(preview.getByText('Société Exemple')).toBeVisible()
+    await expect(
+      preview.frameLocator('iframe').getByText('Bonjour Camille Martin,'),
+    ).toBeVisible()
   })
 
   await test.step('imports a CSV file, the invalid row set aside', async () => {
-    // Within its section: the attachment panel has a file input too.
-    const importSection = page.getByRole('region', { name: 'Importer des contacts' })
-    await importSection.locator('input[type="file"]').setInputFiles({
+    await page.getByRole('button', { name: 'Importer un fichier CSV' }).click()
+
+    const dialog = page.getByRole('dialog')
+    await dialog.locator('input[type="file"]').setInputFiles({
       name: 'contacts.csv',
       mimeType: 'text/csv',
       buffer: Buffer.from(CSV),
     })
-    await page.getByRole('button', { name: 'Importer 3 lignes' }).click()
+
+    await dialog.getByRole('button', { name: 'Importer 3 lignes' }).click()
+
+    // The confirmation says what was added, not what the campaign now holds.
+    await expect(
+      page.getByRole('heading', { name: '2 nouveaux contacts ajoutés' }),
+    ).toBeVisible()
+    await page.getByRole('button', { name: 'Terminé' }).click()
 
     await expect(page.getByText('bob@example.test').first()).toBeVisible()
   })
 
+  await test.step('the preview switches to the first imported contact', async () => {
+    await expect(
+      page.getByRole('region', { name: 'Aperçu' }).getByText('ana@example.test'),
+    ).toBeVisible()
+  })
+
   await test.step('launches it', async () => {
     await page.getByRole('button', { name: 'Lancer la campagne…' }).click()
-    await page.getByRole('checkbox', { name: /J’ai relu l’aperçu/ }).check()
-    await page.getByRole('button', { name: 'Lancer la campagne', exact: true }).click()
+
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByText('2 contacts en attente')).toBeVisible()
+    await dialog.getByRole('button', { name: 'Lancer les 2 envois' }).click()
   })
 
   await test.step('follows the sending until both messages are out', async () => {
     // The page polls every ten seconds while the campaign is sending.
-    await expect(page.getByText(/2 envoyés/)).toBeVisible({ timeout: 45_000 })
+    await expect(page.getByText(/2 envoyés/).first()).toBeVisible({ timeout: 45_000 })
   })
 
   await test.step('Gmail received exactly one message per valid contact', async () => {
@@ -81,5 +116,27 @@ test('a user prepares a campaign, launches it and follows it to the end', async 
     }
 
     expect(sent.recipients.sort()).toEqual(['ana@example.test', 'bob@example.test'])
+  })
+
+  await test.step('the history lists both messages and can seed a follow-up', async () => {
+    await page.getByRole('link', { name: 'Historique' }).click()
+
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Historique' }),
+    ).toBeVisible()
+    await expect(page.getByRole('cell', { name: /Ana/ })).toBeVisible()
+
+    await page.getByRole('checkbox', { name: 'Tout sélectionner sur cette page' }).check()
+    await page.getByRole('button', { name: 'Créer une relance' }).click()
+
+    const dialog = page.getByRole('dialog')
+    await dialog.getByLabel('Nom de la campagne').fill('Relance E2E')
+    await dialog.getByRole('button', { name: 'Créer la campagne' }).click()
+
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Relance E2E' }),
+    ).toBeVisible()
+    // The contacts were copied server-side: nothing had to be re-imported.
+    await expect(page.getByRole('heading', { name: 'Contacts (2)' })).toBeVisible()
   })
 })

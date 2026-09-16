@@ -1,61 +1,307 @@
 @import 'tailwindcss';
 
-/* Design tokens. The visual direction is settled in Phase 1; these are the
-   neutral defaults the scaffolding needs so nothing renders unstyled. */
+/* ===========================================================================
+   Design system
+   ---------------------------------------------------------------------------
+   One palette, one type scale, one set of radii and shadows. Every component
+   reads from here; nothing defines a colour of its own.
+
+   The theme is an attribute on <html>, written before first paint by the
+   inline script in index.html, so a dark-mode reload never flashes white. The
+   attribute is always one of "light" or "dark" — never absent — which is what
+   lets the `dark:` variant below be a plain attribute selector rather than a
+   media query the toggle would have to fight.
+   ========================================================================= */
+
+@custom-variant dark ([data-theme='dark'] &);
+
 @theme {
-  --color-surface: oklch(99% 0 0);
-  --color-surface-raised: oklch(100% 0 0);
-  --color-border: oklch(91% 0.005 260);
-  --color-ink: oklch(24% 0.015 260);
-  --color-ink-muted: oklch(52% 0.015 260);
-  --color-accent: oklch(52% 0.19 258);
-  --color-accent-ink: oklch(99% 0 0);
+  /* --- Neutrals ---------------------------------------------------------
+     A hair of blue in every grey. A truly neutral grey next to a blue accent
+     reads as slightly yellow, and the interface looks dusty. */
+  --color-canvas: oklch(98.4% 0.003 264);
+  --color-surface: oklch(100% 0 0);
+  --color-surface-2: oklch(96.6% 0.004 264);
+  --color-border: oklch(91.5% 0.005 264);
+  --color-border-strong: oklch(84% 0.008 264);
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --color-ink: oklch(21% 0.015 264);
+  --color-ink-muted: oklch(50% 0.013 264);
+  --color-ink-subtle: oklch(63% 0.01 264);
 
-  /* The one curve for motion that answers a person: a fast start, a gentle
+  /* --- Accent ----------------------------------------------------------- */
+  --color-accent: oklch(54% 0.17 262);
+  --color-accent-hover: oklch(48% 0.17 262);
+  --color-accent-soft: oklch(95.5% 0.025 262);
+  --color-accent-ink: oklch(100% 0 0);
+
+  /* --- States -----------------------------------------------------------
+     Each has a "soft" step for a background and a readable step for text on
+     that background. Colour is never the only signal: every state also
+     carries a word and, where it fits, a shape. */
+  --color-success: oklch(52% 0.13 152);
+  --color-success-soft: oklch(95.5% 0.03 152);
+  --color-warning: oklch(52% 0.12 70);
+  --color-warning-soft: oklch(96% 0.04 75);
+  --color-danger: oklch(52% 0.19 25);
+  --color-danger-soft: oklch(96% 0.025 25);
+  --color-info: oklch(52% 0.12 240);
+  --color-info-soft: oklch(96% 0.025 240);
+
+  /* --- Chart series -----------------------------------------------------
+     Kept apart from the state colours: a chart is read by comparing series
+     to each other, not by matching them to a meaning. */
+  --color-series-1: oklch(55% 0.16 258);
+  --color-series-2: oklch(62% 0.14 195);
+  --color-series-3: oklch(60% 0.15 30);
+  --color-series-4: oklch(58% 0.13 310);
+
+  /* --- Typography -------------------------------------------------------
+     Two faces. Space Grotesk carries the headings: geometric, a little
+     technical, and distinctive enough that the interface does not read as a
+     default. Inter carries everything a person actually has to read closely,
+     including every number. */
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display:
+    'Space Grotesk', 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Segoe UI Mono', monospace;
+
+  /* --- Shape ------------------------------------------------------------ */
+  --radius-card: 1rem;
+  --radius-panel: 1.25rem;
+
+  /* --- Depth ------------------------------------------------------------
+     Three steps and no more. A shadow says "this floats above that"; a
+     fourth step says nothing a reader can tell apart. */
+  --shadow-soft:
+    0 1px 2px oklch(20% 0.02 264 / 0.04), 0 1px 1px oklch(20% 0.02 264 / 0.03);
+  --shadow-card:
+    0 1px 3px oklch(20% 0.02 264 / 0.06), 0 8px 24px -12px oklch(20% 0.02 264 / 0.12);
+  --shadow-pop:
+    0 4px 12px oklch(20% 0.02 264 / 0.08), 0 24px 48px -16px oklch(20% 0.02 264 / 0.2);
+
+  /* --- Motion -----------------------------------------------------------
+     One curve for anything that answers a person: a fast start, a gentle
      settle. Replaces Tailwind's default ease-out. See docs/motion.md. */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-spring: cubic-bezier(0.34, 1.35, 0.5, 1);
 }
 
-/* Press feedback for primary actions. Not on a disabled button: a press that
-   visibly lands on something that will not act is a small lie. */
-@utility press {
-  transition-property: transform, opacity, background-color;
-  transition-duration: 160ms;
-  transition-timing-function: var(--ease-out);
+/* ---------------------------------------------------------------------------
+   Dark theme. Only the tokens change; not one component branches on the theme.
+   The surfaces lift rather than the text dimming: a dark interface reads by
+   its planes, and grey-on-grey text is where dark themes usually fail.
+   ------------------------------------------------------------------------- */
+[data-theme='dark'] {
+  --color-canvas: oklch(16.5% 0.012 264);
+  --color-surface: oklch(20.5% 0.014 264);
+  --color-surface-2: oklch(25% 0.015 264);
+  --color-border: oklch(29% 0.015 264);
+  --color-border-strong: oklch(38% 0.018 264);
 
-  &:active:not(:disabled) {
-    transform: scale(0.97);
+  --color-ink: oklch(96% 0.004 264);
+  --color-ink-muted: oklch(73% 0.012 264);
+  --color-ink-subtle: oklch(58% 0.012 264);
+
+  --color-accent: oklch(70% 0.15 262);
+  --color-accent-hover: oklch(77% 0.14 262);
+  --color-accent-soft: oklch(30% 0.06 262);
+  --color-accent-ink: oklch(16% 0.02 264);
+
+  --color-success: oklch(76% 0.15 152);
+  --color-success-soft: oklch(28% 0.06 152);
+  --color-warning: oklch(80% 0.14 75);
+  --color-warning-soft: oklch(30% 0.06 75);
+  --color-danger: oklch(72% 0.16 25);
+  --color-danger-soft: oklch(30% 0.07 25);
+  --color-info: oklch(74% 0.12 240);
+  --color-info-soft: oklch(29% 0.06 240);
+
+  --color-series-1: oklch(70% 0.14 258);
+  --color-series-2: oklch(76% 0.12 195);
+  --color-series-3: oklch(74% 0.14 30);
+  --color-series-4: oklch(72% 0.13 310);
+
+  /* Shadows are nearly invisible on a dark ground; depth comes from the
+     border and the surface step instead, and the shadow only anchors what
+     truly floats. */
+  --shadow-soft: 0 1px 2px oklch(0% 0 0 / 0.3);
+  --shadow-card: 0 1px 3px oklch(0% 0 0 / 0.35), 0 8px 24px -12px oklch(0% 0 0 / 0.5);
+  --shadow-pop: 0 4px 12px oklch(0% 0 0 / 0.4), 0 24px 48px -16px oklch(0% 0 0 / 0.6);
+}
+
+/* ===========================================================================
+   Base
+   ========================================================================= */
+
+@layer base {
+  html {
+    /* Set again by the inline script for the resolved theme, so native
+       controls, scrollbars and form widgets follow. */
+    color-scheme: light;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  [data-theme='dark'] {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* The theme swap itself fades, so the page does not snap between two
+     unrelated pictures. Only the painted properties: transitioning
+     everything would drag every layout change with it. */
+  body,
+  [data-theme] .theme-fade {
+    transition:
+      background-color 220ms var(--ease-out),
+      border-color 220ms var(--ease-out),
+      color 220ms var(--ease-out);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    font-weight: 600;
+  }
+
+  /* Numbers line up in columns wherever they are compared. */
+  th,
+  td,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background-color: var(--color-accent-soft);
+    color: var(--color-ink);
+  }
+
+  /* A scrollbar that belongs to the theme rather than to the operating
+     system's default light grey sitting inside a dark panel. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    &:active:not(:disabled) {
-      transform: none;
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
     }
   }
 }
 
-/* A notice that appears inside a panel the user is already watching. */
-@utility enter {
-  transition-property: opacity, translate;
-  transition-duration: 200ms;
+/* ===========================================================================
+   Utilities
+   ========================================================================= */
+
+/* Press feedback for an action. Never on a disabled control: a press that
+   visibly lands on something that will not act is a small lie. */
+@utility press {
+  transition-property: transform, opacity, background-color, border-color, box-shadow;
+  transition-duration: 150ms;
   transition-timing-function: var(--ease-out);
 
-  @starting-style {
-    opacity: 0;
-    translate: 0 4px;
+  &:active:not(:disabled):not([aria-disabled='true']) {
+    transform: scale(0.975);
   }
+}
 
-  @media (prefers-reduced-motion: reduce) {
-    transition-property: opacity;
+/* The floating navigation, and anything else that sits over scrolling
+   content: a surface you can almost see through, held up by a hairline. */
+@utility glass {
+  background-color: color-mix(in oklab, var(--color-surface) 72%, transparent);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+}
+
+/* A panel that arrives inside a page the user is already reading. */
+@utility enter {
+  animation: enter-up 260ms var(--ease-out) both;
+}
+
+@utility enter-fade {
+  animation: enter-fade 220ms var(--ease-out) both;
+}
+
+/* Staggers a list so rows arrive as a wave rather than all at once. Capped:
+   past the eighth row nobody is still watching the animation. */
+@utility stagger {
+  animation: enter-up 260ms var(--ease-out) both;
+  animation-delay: calc(var(--index, 0) * 40ms);
+}
+
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes enter-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
   }
 }
 
 @layer components {
-  /* The launch confirmation fades and settles in, and leaves the same way.
-     It stays centred: a modal does not grow from the button that opened it. */
-  .launch-dialog {
+  /* --- Skeletons -------------------------------------------------------
+     A shape where the content will be, not a spinner. The sweep is slow and
+     low-contrast: a fast shimmer reads as an error state. */
+  .skeleton {
+    background-image: linear-gradient(
+      90deg,
+      var(--color-surface-2) 25%,
+      color-mix(in oklab, var(--color-border) 60%, var(--color-surface-2)) 37%,
+      var(--color-surface-2) 63%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s ease-in-out infinite;
+    border-radius: 0.5rem;
+  }
+
+  /* --- Dialogs ---------------------------------------------------------
+     Centred, always. A modal does not grow out of the button that opened it:
+     the eye then looks for the button instead of reading the question. */
+  .dialog {
     opacity: 1;
     scale: 1;
     transition-property: opacity, scale, overlay, display;
@@ -64,58 +310,135 @@
     transition-behavior: allow-discrete;
   }
 
-  .launch-dialog:not([open]) {
+  .dialog:not([open]) {
     opacity: 0;
     scale: 0.97;
   }
 
   @starting-style {
-    .launch-dialog[open] {
+    .dialog[open] {
       opacity: 0;
       scale: 0.97;
     }
   }
 
-  .launch-dialog::backdrop {
-    background-color: rgb(0 0 0 / 0.4);
+  .dialog::backdrop {
+    background-color: oklch(14% 0.01 264 / 0.45);
+    backdrop-filter: blur(3px);
     transition-property: background-color, overlay, display;
     transition-duration: 200ms;
     transition-timing-function: var(--ease-out);
     transition-behavior: allow-discrete;
   }
 
-  .launch-dialog:not([open])::backdrop {
-    background-color: rgb(0 0 0 / 0);
+  .dialog:not([open])::backdrop {
+    background-color: oklch(14% 0.01 264 / 0);
   }
 
   @starting-style {
-    .launch-dialog[open]::backdrop {
-      background-color: rgb(0 0 0 / 0);
+    .dialog[open]::backdrop {
+      background-color: oklch(14% 0.01 264 / 0);
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .launch-dialog,
-    .launch-dialog:not([open]) {
+    .dialog,
+    .dialog:not([open]) {
       scale: 1;
     }
   }
-}
 
-@layer base {
-  html {
-    color-scheme: light;
-  }
-
-  body {
-    background-color: var(--color-surface);
-    color: var(--color-ink);
+  /* --- The rich text editor -------------------------------------------
+     Quill ships its own chrome, built for a light page. These rules make it
+     part of this interface instead of a white box sitting inside it. */
+  .editor .ql-toolbar.ql-snow,
+  .editor .ql-container.ql-snow {
+    border: 0;
     font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
   }
 
-  :focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
+  .editor .ql-toolbar.ql-snow {
+    border-bottom: 1px solid var(--color-border);
+    padding: 0.5rem 0.75rem;
+  }
+
+  .editor .ql-container.ql-snow {
+    font-size: 0.875rem;
+  }
+
+  .editor .ql-editor {
+    min-height: 15rem;
+    padding: 1rem 1.125rem;
+    line-height: 1.65;
+    color: var(--color-ink);
+  }
+
+  .editor .ql-editor.ql-blank::before {
+    color: var(--color-ink-subtle);
+    font-style: normal;
+    left: 1.125rem;
+    right: 1.125rem;
+  }
+
+  .editor .ql-snow .ql-stroke {
+    stroke: var(--color-ink-muted);
+  }
+
+  .editor .ql-snow .ql-fill {
+    fill: var(--color-ink-muted);
+  }
+
+  .editor .ql-snow .ql-picker {
+    color: var(--color-ink-muted);
+  }
+
+  .editor .ql-snow button:hover .ql-stroke,
+  .editor .ql-snow button.ql-active .ql-stroke {
+    stroke: var(--color-accent);
+  }
+
+  .editor .ql-snow button:hover .ql-fill,
+  .editor .ql-snow button.ql-active .ql-fill {
+    fill: var(--color-accent);
+  }
+
+  .editor .ql-snow .ql-tooltip {
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
+    box-shadow: var(--shadow-pop);
+    color: var(--color-ink);
+    border-radius: 0.5rem;
+  }
+
+  .editor .ql-snow .ql-tooltip input[type='text'] {
+    background-color: var(--color-surface-2);
+    border-color: var(--color-border);
+    color: var(--color-ink);
+    border-radius: 0.375rem;
+  }
+
+  /* --- Legal pages -----------------------------------------------------
+     Long-form prose, set once rather than class by class. */
+  .prose-legal p {
+    color: var(--color-ink-muted);
+    line-height: 1.75;
+  }
+
+  .prose-legal a {
+    color: var(--color-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .prose-legal ul {
+    list-style: disc;
+    padding-inline-start: 1.25rem;
+    color: var(--color-ink-muted);
+    line-height: 1.75;
+  }
+
+  .prose-legal strong {
+    color: var(--color-ink);
+    font-weight: 600;
   }
 }

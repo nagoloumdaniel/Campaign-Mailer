@@ -1,6 +1,7 @@
 import type { Pool } from 'pg'
 
 import type { CampaignOwnershipRepository } from '../middleware/auth.js'
+import type { CampaignType } from '../schemas/campaign.js'
 import type { CampaignStatus } from './campaignState.js'
 import { countSentToday } from './sendEngine.js'
 
@@ -8,11 +9,10 @@ export interface CampaignRow {
   id: string
   user_id: string
   name: string
+  type: CampaignType
   subject: string | null
   body_html: string | null
   body_text: string | null
-  attachment_key: string | null
-  attachment_name: string | null
   status: CampaignStatus
   total_contacts: number
   sent_count: number
@@ -28,9 +28,31 @@ export interface CampaignRow {
   completed_at: Date | null
 }
 
+/** One stored file of a campaign, in upload order. */
+export interface CampaignAttachmentRow {
+  id: string
+  campaign_id: string
+  object_key: string
+  name: string
+  size_bytes: number | null
+  content_type: string
+  created_at: Date
+}
+
+/**
+ * How many files one campaign may carry.
+ *
+ * Gmail refuses a message much past ten megabytes once base64 inflates it, and
+ * each file is capped at ten on its own, so five is a cap on the clutter
+ * rather than on the bytes: past a CV, a cover letter and a transcript, a
+ * recipient stops opening them.
+ */
+export const MAX_ATTACHMENTS = 5
+
 /** The fields a client may set. Counters and timestamps are the server's. */
 export interface CampaignWritableFields {
   name: string
+  type: CampaignType
   subject: string | null
   body_html: string | null
   body_text: string | null
@@ -45,11 +67,14 @@ export interface CampaignWritableFields {
  * added later is not exposed by accident.
  */
 const COLUMNS = `
-  id, user_id, name, subject, body_html, body_text,
-  attachment_key, attachment_name, status,
+  id, user_id, name, type, subject, body_html, body_text, status,
   total_contacts, sent_count, error_count,
   mails_per_day, start_hour, pause_ms, timezone,
   created_at, updated_at, scheduled_at, started_at, completed_at
+`
+
+const ATTACHMENT_COLUMNS = `
+  id, campaign_id, object_key, name, size_bytes, content_type, created_at
 `
 
 /**
@@ -77,10 +102,37 @@ export interface CampaignRepository extends CampaignOwnershipRepository {
   create(userId: string, input: CampaignPatch & { name: string }): Promise<CampaignRow>
   findForUser(campaignId: string, userId: string): Promise<CampaignRow | null>
   update(campaignId: string, patch: CampaignPatch): Promise<CampaignRow | null>
-  setAttachment(
+  /** A campaign's files, oldest first. */
+  listAttachments(campaignId: string): Promise<CampaignAttachmentRow[]>
+  findAttachment(
     campaignId: string,
-    attachment: { key: string; name: string } | null,
-  ): Promise<CampaignRow | null>
+    attachmentId: string,
+  ): Promise<CampaignAttachmentRow | null>
+  /**
+   * Stores one more file, unless the campaign already holds `MAX_ATTACHMENTS`.
+   * Null when the cap is reached, so the caller can delete the object it has
+   * just uploaded rather than leaving it orphaned.
+   */
+  addAttachment(
+    campaignId: string,
+    attachment: {
+      object_key: string
+      name: string
+      size_bytes: number
+      content_type: string
+    },
+  ): Promise<CampaignAttachmentRow | null>
+  removeAttachment(campaignId: string, attachmentId: string): Promise<boolean>
+  /**
+   * Creates a campaign holding copies of contacts taken from the user's other
+   * campaigns. Returns the campaign and how many contacts it received; the
+   * unique index on (campaign_id, lower(email)) collapses duplicates, so a
+   * selection naming one address twice produces one contact.
+   */
+  createFollowUp(
+    userId: string,
+    input: { name: string; type: CampaignType; contactIds: readonly string[] },
+  ): Promise<{ campaign: CampaignRow; imported: number }>
   remove(campaignId: string): Promise<boolean>
   /**
    * Moves the campaign to `to` only if it is still in one of `from`. Null when
@@ -99,6 +151,7 @@ export interface CampaignRepository extends CampaignOwnershipRepository {
 /** Column names a patch may touch, so a key from a payload never reaches SQL. */
 const PATCHABLE = new Set<keyof CampaignWritableFields>([
   'name',
+  'type',
   'subject',
   'body_html',
   'body_text',
@@ -133,14 +186,15 @@ export function createCampaignRepository(pool: Pool): CampaignRepository {
 
     async create(userId, input) {
       const { rows } = await pool.query<CampaignRow>(
-        `INSERT INTO campaigns (user_id, name, subject, body_html, body_text,
+        `INSERT INTO campaigns (user_id, name, type, subject, body_html, body_text,
                                 mails_per_day, start_hour, pause_ms, timezone)
-         VALUES ($1, $2, $3, $4, $5,
-                 COALESCE($6, 46), COALESCE($7, 9), COALESCE($8, 30000), COALESCE($9, 'Europe/Paris'))
+         VALUES ($1, $2, COALESCE($3::campaign_type, 'autre'), $4, $5, $6,
+                 COALESCE($7, 46), COALESCE($8, 10), COALESCE($9, 30000), COALESCE($10, 'Europe/Paris'))
          RETURNING ${COLUMNS}`,
         [
           userId,
           input.name,
+          input.type ?? null,
           input.subject ?? null,
           input.body_html ?? null,
           input.body_text ?? null,
@@ -209,14 +263,107 @@ export function createCampaignRepository(pool: Pool): CampaignRepository {
       return rows[0] ?? null
     },
 
-    async setAttachment(campaignId, attachment) {
-      const { rows } = await pool.query<CampaignRow>(
-        `UPDATE campaigns SET attachment_key = $2, attachment_name = $3
-         WHERE id = $1 RETURNING ${COLUMNS}`,
-        [campaignId, attachment?.key ?? null, attachment?.name ?? null],
+    async listAttachments(campaignId) {
+      const { rows } = await pool.query<CampaignAttachmentRow>(
+        `SELECT ${ATTACHMENT_COLUMNS} FROM campaign_attachments
+         WHERE campaign_id = $1 ORDER BY created_at, id`,
+        [campaignId],
+      )
+
+      return rows
+    },
+
+    async findAttachment(campaignId, attachmentId) {
+      // Scoped by campaign as well as by id, so an attachment of another
+      // campaign cannot be downloaded or deleted through this one.
+      const { rows } = await pool.query<CampaignAttachmentRow>(
+        `SELECT ${ATTACHMENT_COLUMNS} FROM campaign_attachments
+         WHERE id = $1 AND campaign_id = $2`,
+        [attachmentId, campaignId],
       )
 
       return rows[0] ?? null
+    },
+
+    async addAttachment(campaignId, attachment) {
+      // The cap is checked inside the INSERT rather than by a count followed
+      // by a write: two uploads finishing at once would both read four and
+      // both insert. The SELECT in the WHERE clause is evaluated by the same
+      // statement that writes.
+      const { rows } = await pool.query<CampaignAttachmentRow>(
+        `INSERT INTO campaign_attachments (campaign_id, object_key, name, size_bytes, content_type)
+         SELECT $1, $2, $3, $4, $5
+         WHERE (SELECT count(*) FROM campaign_attachments WHERE campaign_id = $1) < ${String(MAX_ATTACHMENTS)}
+         RETURNING ${ATTACHMENT_COLUMNS}`,
+        [
+          campaignId,
+          attachment.object_key,
+          attachment.name,
+          attachment.size_bytes,
+          attachment.content_type,
+        ],
+      )
+
+      return rows[0] ?? null
+    },
+
+    async removeAttachment(campaignId, attachmentId) {
+      const result = await pool.query(
+        'DELETE FROM campaign_attachments WHERE id = $1 AND campaign_id = $2',
+        [attachmentId, campaignId],
+      )
+
+      return (result.rowCount ?? 0) > 0
+    },
+
+    async createFollowUp(userId, input) {
+      const client = await pool.connect()
+
+      try {
+        await client.query('BEGIN')
+
+        const { rows } = await client.query<CampaignRow>(
+          `INSERT INTO campaigns (user_id, name, type)
+           VALUES ($1, $2, $3::campaign_type)
+           RETURNING ${COLUMNS}`,
+          [userId, input.name, input.type],
+        )
+
+        const campaign = rows[0]
+
+        if (!campaign) {
+          throw new Error('Follow-up campaign insert returned no row')
+        }
+
+        // The source contacts are re-read here, joined to their campaign and
+        // filtered by owner: an id from another account selects nothing rather
+        // than copying a stranger's address into this campaign.
+        const copied = await client.query(
+          `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation)
+           SELECT $1, ct.email, ct.contact_name, ct.company_name, ct.salutation
+           FROM contacts ct
+           JOIN campaigns src ON src.id = ct.campaign_id
+           WHERE ct.id = ANY($2::uuid[]) AND src.user_id = $3
+           ON CONFLICT DO NOTHING`,
+          [campaign.id, input.contactIds, userId],
+        )
+
+        const imported = copied.rowCount ?? 0
+
+        const { rows: updated } = await client.query<CampaignRow>(
+          `UPDATE campaigns SET total_contacts = $2 WHERE id = $1 RETURNING ${COLUMNS}`,
+          [campaign.id, imported],
+        )
+
+        await client.query('COMMIT')
+
+        return { campaign: updated[0] ?? campaign, imported }
+      } catch (err) {
+        await client.query('ROLLBACK')
+        throw err
+      } finally {
+        client.release()
+      }
     },
 
     async remove(campaignId) {

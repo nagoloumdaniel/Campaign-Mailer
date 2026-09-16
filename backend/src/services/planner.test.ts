@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { localHour, planDay, type PlanInput } from './planner.js'
+import {
+  LAST_SEND_HOUR,
+  localHour,
+  planDay,
+  windowRemainingMs,
+  type PlanInput,
+} from './planner.js'
 
 const ids = (n: number) => Array.from({ length: n }, (_, i) => `c${String(i)}`)
 
@@ -116,5 +122,76 @@ describe('when', () => {
   it('never produces two identical gaps with a real random source', () => {
     const gaps = new Set(gapsOf(sends({ mailsPerDay: 20, random: Math.random })))
     assert.ok(gaps.size > 1, 'a perfectly regular interval is a signature')
+  })
+})
+
+describe('the sending window', () => {
+  it('closes at the end of the last send hour', () => {
+    // 18:05 in Paris in July is 16:05 UTC. Nothing is queued: a campaign
+    // launched in the evening starts the next morning, which is what the
+    // interface promised.
+    const outcome = planDay(
+      input({ now: new Date('2026-07-01T16:05:00Z'), startHour: 10 }),
+    )
+
+    assert.deepEqual(outcome, { kind: 'after_send_window' })
+  })
+
+  it('still plans during the last send hour', () => {
+    // 17:05 in Paris, the last hour a send may begin.
+    const outcome = planDay(
+      input({ now: new Date('2026-07-01T15:05:00Z'), startHour: 10 }),
+    )
+
+    assert.equal(outcome.kind, 'planned')
+  })
+
+  it('stops the plan where the window ends rather than delivering into the night', () => {
+    // 17:00 in Paris, one hour of window left, five minutes between sends:
+    // twelve fit, the rest wait for tomorrow morning.
+    const planned = sends({
+      now: new Date('2026-07-01T15:00:00Z'),
+      startHour: 10,
+      pauseMs: 300_000,
+      mailsPerDay: 100,
+      accountLimit: 450,
+      pendingContactIds: ids(100),
+    })
+
+    assert.equal(planned.length, 12)
+    assert.ok(
+      (planned.at(-1)?.delayMs ?? 0) < 60 * 60 * 1000,
+      'the last send should still fall inside the window',
+    )
+  })
+
+  it('reports a closed window when nothing fits, rather than an empty plan', () => {
+    // 17:59:30 in Paris: half a minute left, and the pause is longer than that.
+    const outcome = planDay(
+      input({
+        now: new Date('2026-07-01T15:59:59Z'),
+        startHour: 10,
+        pauseMs: 600_000,
+        pendingContactIds: ids(3),
+      }),
+    )
+
+    assert.equal(outcome.kind, 'planned')
+    assert.equal(outcome.sends.length, 1, 'the first send has no delay, so it fits')
+  })
+
+  it('counts what is left of the window from the campaign’s own clock', () => {
+    const at = new Date('2026-07-01T15:00:00Z')
+
+    // 17:00 in Paris: one hour to 18:00.
+    assert.equal(windowRemainingMs(at, 'Europe/Paris'), 60 * 60 * 1000)
+    // The same instant is 16:00 in London, which keeps summer time too.
+    assert.equal(windowRemainingMs(at, 'Europe/London'), 2 * 60 * 60 * 1000)
+    // An hour earlier it is 23:00 in Tokyo, where the window closed long ago.
+    assert.equal(windowRemainingMs(new Date('2026-07-01T14:00:00Z'), 'Asia/Tokyo'), 0)
+  })
+
+  it('names the last hour a user may choose as a start hour', () => {
+    assert.equal(LAST_SEND_HOUR, 17)
   })
 })
