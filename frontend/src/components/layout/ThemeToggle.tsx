@@ -20,7 +20,7 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
   const label = goingDark ? 'Passer en thème sombre' : 'Passer en thème clair'
 
   return (
-    <Tooltip label={label}>
+    <Tooltip label={label} align="end">
       <button
         type="button"
         onClick={toggle}

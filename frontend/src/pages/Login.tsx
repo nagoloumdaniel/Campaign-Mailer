@@ -58,15 +58,15 @@ export function Login() {
         <ThemeToggle />
       </header>
 
-      <main className="mx-auto grid w-full max-w-md flex-1 content-center gap-8 px-5 py-6 md:max-w-4xl md:grid-cols-[1.15fr_1fr] md:items-center md:gap-12">
+      <main className="mx-auto grid w-full max-w-md flex-1 content-center gap-6 px-5 py-4 sm:py-6 md:max-w-4xl md:grid-cols-[1.15fr_auto_1fr] md:items-center md:gap-12">
         <div>
           <h1 className="text-[28px] leading-tight font-semibold tracking-tight text-balance sm:text-[32px]">
-            Vos candidatures, envoyées une par une.
+            Vos Campagnes Mails, envoyées une par une.
           </h1>
 
           <p className="mt-3 text-[15px] leading-relaxed text-ink-muted">
             Un message, une liste de contacts, et des envois étalés sur plusieurs jours
-            depuis votre propre compte Gmail — au rythme d’une personne, pas d’un robot.
+            depuis votre propre compte Gmail au rythme d’une personne, pas d’un robot.
           </p>
 
           {deleted && (
@@ -114,7 +114,9 @@ export function Login() {
           </div>
         </div>
 
-        <ul className="space-y-3 border-t border-border pt-6 md:rounded-2xl md:border md:bg-surface md:p-5">
+        <div aria-hidden="true" className="hidden w-px self-stretch bg-border md:block" />
+
+        <ul className="space-y-3 border-t border-border pt-5 md:border-t-0 md:pt-0">
           <Point icon="send">
             Les e-mails partent de <strong className="font-medium text-ink">votre</strong>{' '}
             adresse Gmail, avec vos réponses dans votre boîte.
