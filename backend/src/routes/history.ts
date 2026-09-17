@@ -4,6 +4,7 @@ import { requireAuth, signedInUserId } from '../middleware/auth.js'
 import { historyQuerySchema, type HistoryQueryInput } from '../schemas/history.js'
 import {
   historyToCsv,
+  subjectOf,
   type HistoryRepository,
   type HistoryRow,
 } from '../services/history.js'
@@ -88,7 +89,7 @@ function toPublicEntry(row: HistoryRow) {
     campaignId: row.campaign_id,
     campaignName: row.campaign_name,
     campaignType: row.campaign_type,
-    subject: row.campaign_subject,
+    subject: subjectOf(row),
     contactId: row.contact_id,
     email: row.email,
     contactName: row.contact_name,

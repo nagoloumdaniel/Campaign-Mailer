@@ -1,6 +1,7 @@
 import { Router } from 'express'
 
 import { requireAuth, signedInUserId } from '../middleware/auth.js'
+import { dashboardQuerySchema } from '../schemas/dashboard.js'
 import type { CampaignStatus } from '../services/campaignState.js'
 import { CAMPAIGN_STATUSES } from '../services/campaignState.js'
 import { estimateSchedule } from '../services/campaignStats.js'
@@ -39,6 +40,13 @@ export function createDashboardRouter({
 
   router.get('/', (req, res, next) => {
     void (async () => {
+      const query = dashboardQuerySchema.safeParse(req.query)
+
+      if (!query.success) {
+        res.status(400).json({ error: 'Invalid query' })
+        return
+      }
+
       const rows = await campaigns.listForUser(userId(req))
       const at = now?.() ?? new Date()
 
@@ -84,7 +92,12 @@ export function createDashboardRouter({
         }),
       )
 
-      const sentLast24h = await campaigns.accountSentLast24h(userId(req))
+      const [sentLast24h, perDay] = await Promise.all([
+        campaigns.accountSentLast24h(userId(req)),
+        // Two weeks: long enough to show a campaign's rhythm, short enough
+        // that the line still means "lately".
+        stats.accountSendsPerDay(userId(req), query.data.timezone, 14),
+      ])
 
       res.json({
         dashboard: {
@@ -96,6 +109,7 @@ export function createDashboardRouter({
             sentLast24h,
             dailyLimit: accountDailyLimit,
             remaining: Math.max(0, accountDailyLimit - sentLast24h),
+            perDay,
           },
           // Soonest first; a campaign with nothing left to send has no next
           // send and goes last.

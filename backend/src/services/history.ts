@@ -2,6 +2,7 @@ import type { Pool } from 'pg'
 
 import type { CampaignType } from '../schemas/campaign.js'
 import { csvCell } from './logExport.js'
+import { renderText } from './template.js'
 
 /**
  * Every message this account has sent, across every campaign.
@@ -30,6 +31,7 @@ export interface HistoryRow {
   email: string | null
   contact_name: string | null
   company_name: string | null
+  salutation: string | null
   outcome: HistoryOutcome
   message: string | null
   created_at: Date
@@ -81,6 +83,7 @@ const SELECT_ROWS = `
          ct.email,
          ct.contact_name,
          ct.company_name,
+         ct.salutation,
          CASE WHEN l.event_type = 'sent' THEN 'sent' ELSE 'failed' END AS outcome,
          l.message,
          l.created_at
@@ -214,6 +217,28 @@ export function createHistoryRepository(pool: Pool): HistoryRepository {
   }
 }
 
+/**
+ * The subject this recipient actually received.
+ *
+ * The campaign stores the template — `Candidature — {{company_name}}` — and a
+ * history that shows the template reads as if the braces had gone out. The
+ * merge is the same one the composer runs, over the contact the log points
+ * at, so the line on screen is the line in the recipient's inbox. A contact
+ * deleted since has no values left, and the template's own fallbacks apply.
+ */
+export function subjectOf(row: HistoryRow): string | null {
+  if (row.campaign_subject === null) {
+    return null
+  }
+
+  return renderText(row.campaign_subject, {
+    email: row.email,
+    contact_name: row.contact_name,
+    company_name: row.company_name,
+    salutation: row.salutation,
+  })
+}
+
 const TYPE_LABELS: Record<CampaignType, string> = {
   prospection: 'Prospection',
   relance: 'Relance',
@@ -271,7 +296,7 @@ export function historyToCsv(rows: readonly HistoryRow[], timezone: string): str
       row.company_name ?? '',
       row.campaign_name,
       campaignTypeLabel(row.campaign_type),
-      row.campaign_subject ?? '',
+      subjectOf(row) ?? '',
       row.outcome === 'sent' ? 'envoyé' : 'erreur',
       row.message ?? '',
     ]

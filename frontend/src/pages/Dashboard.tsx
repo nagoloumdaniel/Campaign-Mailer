@@ -6,6 +6,7 @@ import { QuotaAdvice } from '@/components/dashboard/QuotaAdvice'
 import { QuotaCard } from '@/components/dashboard/QuotaCard'
 import { StatCard } from '@/components/dashboard/StatCard'
 import { UpcomingSends } from '@/components/dashboard/UpcomingSends'
+import { Sparkline } from '@/components/charts/Sparkline'
 import { PageHeader, SectionHeader } from '@/components/layout/PageHeader'
 import { DashboardSkeleton } from '@/components/skeletons/PageSkeletons'
 import { Button, LinkButton } from '@/components/ui/Button'
@@ -178,9 +179,16 @@ export function Dashboard() {
                 icon="send"
                 to="/campaigns"
                 detail={
-                  groups.drafts.length > 0
-                    ? `dont ${countOf(groups.drafts.length, 'brouillon')}`
-                    : undefined
+                  [
+                    groups.completed.length > 0
+                      ? countOf(groups.completed.length, 'terminée')
+                      : null,
+                    groups.drafts.length > 0
+                      ? countOf(groups.drafts.length, 'brouillon')
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || undefined
                 }
               />
               <StatCard
@@ -201,7 +209,19 @@ export function Dashboard() {
                 value={formatNumber(totals.sent)}
                 icon="mail"
                 tone={totals.sent > 0 ? 'success' : 'neutral'}
-                detail="Depuis la création du compte"
+                detail={`${formatNumber(
+                  dashboard.account.perDay.reduce((sum, day) => sum + day.sent, 0),
+                )} ces 14 derniers jours`}
+                trend={
+                  <Sparkline
+                    values={dashboard.account.perDay.map((day) => day.sent)}
+                    label={`Envois par jour sur 14 jours : ${dashboard.account.perDay
+                      .map((day) => String(day.sent))
+                      .join(', ')}`}
+                    width={84}
+                    height={28}
+                  />
+                }
               />
               <StatCard
                 index={3}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { campaignTypeLabel, historyToCsv, type HistoryRow } from './history.js'
+import { campaignTypeLabel, historyToCsv, subjectOf, type HistoryRow } from './history.js'
 
 function row(overrides: Partial<HistoryRow> = {}): HistoryRow {
   return {
@@ -9,11 +9,12 @@ function row(overrides: Partial<HistoryRow> = {}): HistoryRow {
     campaign_id: 'k1',
     campaign_name: 'Candidatures',
     campaign_type: 'alternance',
-    campaign_subject: 'Candidature alternance',
+    campaign_subject: 'Candidature alternance — {{company_name}}',
     contact_id: 'c1',
     email: 'rh@exemple.fr',
     contact_name: 'Camille Martin',
     company_name: 'Société Exemple',
+    salutation: 'Madame',
     outcome: 'sent',
     message: null,
     created_at: new Date('2026-09-15T12:30:00Z'),
@@ -87,5 +88,56 @@ describe('campaignTypeLabel', () => {
     assert.equal(campaignTypeLabel('prospection'), 'Prospection')
     assert.equal(campaignTypeLabel('marketing'), 'Marketing')
     assert.equal(campaignTypeLabel('autre'), 'Autre')
+  })
+})
+
+describe('subjectOf', () => {
+  it('shows the subject the recipient received, not the template', () => {
+    assert.equal(
+      subjectOf({
+        id: 'l1',
+        campaign_id: 'k1',
+        campaign_name: 'C',
+        campaign_type: 'autre',
+        campaign_subject: 'Candidature — {{company_name}}',
+        contact_id: 'c1',
+        email: 'rh@acme.fr',
+        contact_name: 'Ana',
+        company_name: 'Acme',
+        salutation: null,
+        outcome: 'sent',
+        message: null,
+        created_at: new Date(),
+      }),
+      'Candidature — Acme',
+    )
+  })
+
+  it('falls back to the template’s own default once the contact is gone', () => {
+    assert.equal(
+      subjectOf({
+        id: 'l1',
+        campaign_id: 'k1',
+        campaign_name: 'C',
+        campaign_type: 'autre',
+        campaign_subject: 'Candidature — {{company_name|votre équipe}}',
+        contact_id: null,
+        email: null,
+        contact_name: null,
+        company_name: null,
+        salutation: null,
+        outcome: 'sent',
+        message: null,
+        created_at: new Date(),
+      }),
+      'Candidature — votre équipe',
+    )
+  })
+
+  it('writes the rendered subject into the export', () => {
+    assert.ok(
+      historyToCsv([row()], 'UTC').includes('"Candidature alternance — Société Exemple"'),
+    )
+    assert.ok(!historyToCsv([row()], 'UTC').includes('{{'))
   })
 })

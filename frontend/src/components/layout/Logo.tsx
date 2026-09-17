@@ -1,15 +1,11 @@
 /**
  * The mark, as a drawing rather than as a picture file.
  *
- * `public/logo.png` is black on an opaque white square and `logo1.png` is
- * white on white: the first shows a white tile on any surface that is not
- * pure white, the second disappears in light mode. Swapping between them
- * would need a second file for every surface, and neither scales cleanly at
- * 28 pixels.
- *
- * Drawn here it takes `currentColor`, so it is black on a light theme and
- * white on a dark one with nothing to switch, stays sharp at every size and
- * on every screen, and costs no request at all.
+ * It takes `currentColor`, so it is black on a light theme and white on a dark
+ * one with nothing to switch, stays sharp at every size, and costs no request.
+ * The raster versions it replaced were removed on 17 September 2026: one was
+ * black on an opaque white square, the other white on white. The favicon in
+ * `public/favicon.svg` draws the same paths.
  */
 export function Logo({
   size = 28,

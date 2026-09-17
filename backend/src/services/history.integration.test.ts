@@ -192,6 +192,7 @@ describe(
       assert.equal(first.campaign_name, 'Relance octobre')
       assert.equal(first.campaign_type, 'relance')
       assert.equal(first.campaign_subject, 'Petite relance')
+      assert.equal(first.salutation, null)
       assert.equal(first.outcome, 'sent')
     })
 

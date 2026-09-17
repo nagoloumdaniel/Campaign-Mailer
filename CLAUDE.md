@@ -10,7 +10,7 @@ The application is proprietary. Copyright holder: Daniel Nagoloum Talla. See `LI
 
 ## State of the repository
 
-**Phase 7 delivered, awaiting review (15 September 2026).** Phases 0 to 6 are complete: sign-in, campaigns, CSV import, attachments, the send engine, dashboard and statistics, data protection. Phase 7 added structured logs, Sentry, readiness and alerts, the throwaway-schema test runs, the Playwright journey and the documentation in `docs/`. Phase 8 (production deployment) is next.
+**Phase 7 delivered, then the interface rebuilt at the owner's request (16–17 September 2026).** Phases 0 to 6 are complete: sign-in, campaigns, CSV import, attachments, the send engine, dashboard and statistics, data protection. Phase 7 added structured logs, Sentry, readiness and alerts, the throwaway-schema test runs, the Playwright journey and the documentation in `docs/`. The rebuild that followed put the web application on one design system and brought five rules with it: campaign types, five attachments, office-hours sending, the account-wide history with follow-ups, and the quota advice. Its migrations are applied to the development database. Phase 8 (production deployment) is next.
 
 `ROADMAP.md` is the plan of record: ten phases, and within a phase one bullet is one ticket, one commit on `main`. Read it before starting work. It carries the definition of done for each phase and annotates every work item with the skills to load before implementing it.
 

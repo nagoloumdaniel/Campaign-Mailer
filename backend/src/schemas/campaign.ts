@@ -91,6 +91,9 @@ const timezone = z
 export const FIRST_SEND_HOUR = 10
 export const LAST_SEND_HOUR = 17
 
+/** The same check, for a query string that names a zone the database will read. */
+export const ianaTimezone = timezone
+
 const cadence = {
   mails_per_day: z.number().int().min(MIN_MAILS_PER_DAY).max(MAX_MAILS_PER_DAY),
   start_hour: z.number().int().min(FIRST_SEND_HOUR).max(LAST_SEND_HOUR),

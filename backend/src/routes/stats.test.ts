@@ -49,6 +49,7 @@ const campaigns = {
 } as unknown as CampaignRepository
 
 const stats: StatsRepository = {
+  accountSendsPerDay: () => Promise.resolve([]),
   contactCounts: () => Promise.resolve(counts),
   sendWindow: () => Promise.resolve(window),
   sendsPerDay: (_id, zone) => {

@@ -21,11 +21,19 @@ export interface Dashboard {
     sentLast24h: number
     dailyLimit: number
     remaining: number
+    /** Sends per calendar day over the last two weeks, oldest first, zero-filled. */
+    perDay: { day: string; sent: number }[]
   }
   /** Scheduled and running campaigns, soonest next send first. */
   upcoming: UpcomingSend[]
 }
 
 export const dashboardApi = {
-  get: () => api.get<{ dashboard: Dashboard }>('/dashboard').then((r) => r.dashboard),
+  // The browser's zone, so a send at 00:30 lands on the day the reader lived it.
+  get: () =>
+    api
+      .get<{ dashboard: Dashboard }>(
+        `/dashboard?timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`,
+      )
+      .then((r) => r.dashboard),
 }

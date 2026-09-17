@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import { Icon, type IconName } from '@/components/ui/Icon'
@@ -34,6 +34,8 @@ export interface StatCardProps {
   icon: IconName
   tone?: StatTone
   detail?: string | undefined
+  /** A small chart beside the figure: which way, where the figure says how much. */
+  trend?: ReactNode
   /** Turns the whole card into a link, for a figure that has a page behind it. */
   to?: string | undefined
   index?: number
@@ -45,6 +47,7 @@ export function StatCard({
   icon,
   tone = 'neutral',
   detail,
+  trend,
   to,
   index = 0,
 }: StatCardProps) {
@@ -60,9 +63,12 @@ export function StatCard({
         </span>
       </div>
 
-      <p className="tabular mt-2.5 font-display text-[26px] leading-none font-semibold tracking-tight">
-        {value}
-      </p>
+      <div className="mt-2.5 flex items-end justify-between gap-3">
+        <p className="tabular font-display text-[26px] leading-none font-semibold tracking-tight">
+          {value}
+        </p>
+        {trend}
+      </div>
 
       {detail && <p className="mt-1.5 text-xs text-ink-muted">{detail}</p>}
     </>

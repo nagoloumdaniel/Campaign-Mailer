@@ -55,6 +55,8 @@ const campaigns = {
   accountSentLast24h: () => Promise.resolve(accountSent),
 } as unknown as CampaignRepository
 
+let askedZone: string | null = null
+
 const stats: StatsRepository = {
   contactCounts: (id) =>
     Promise.resolve({
@@ -74,6 +76,13 @@ const stats: StatsRepository = {
       ),
     }),
   sendsPerDay: () => Promise.resolve([]),
+  accountSendsPerDay: (_userId, timezone) => {
+    askedZone = timezone
+    return Promise.resolve([
+      { day: '2026-06-30', sent: 3 },
+      { day: '2026-07-01', sent: 5 },
+    ])
+  },
 }
 
 let baseUrl: string
@@ -114,6 +123,7 @@ after(async () => {
 })
 
 beforeEach(() => {
+  askedZone = null
   rows = []
   accountSent = 0
   signedInAs = ALICE
@@ -215,5 +225,31 @@ describe('GET /dashboard', () => {
         ['done', true],
       ],
     )
+  })
+})
+
+describe('the account sparkline', () => {
+  it('returns the account’s sends per day, in the zone asked for', async () => {
+    const response = await fetch(`${baseUrl}/dashboard?timezone=America/New_York`)
+    const body = (await response.json()) as {
+      dashboard: { account: { perDay: { day: string; sent: number }[] } }
+    }
+
+    assert.equal(response.status, 200)
+    assert.equal(askedZone, 'America/New_York')
+    assert.deepEqual(
+      body.dashboard.account.perDay.map((day) => day.sent),
+      [3, 5],
+    )
+  })
+
+  it('reads the calendar in Paris when no zone is given', async () => {
+    await fetch(`${baseUrl}/dashboard`)
+    assert.equal(askedZone, 'Europe/Paris')
+  })
+
+  it('refuses a fixed offset, which PostgreSQL would read differently', async () => {
+    const response = await fetch(`${baseUrl}/dashboard?timezone=%2B02%3A00`)
+    assert.equal(response.status, 400)
   })
 })

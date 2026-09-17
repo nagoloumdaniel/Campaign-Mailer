@@ -34,6 +34,15 @@ export interface StatsRepository {
   contactCounts(campaignId: string): Promise<ContactCounts>
   sendWindow(campaignId: string): Promise<SendWindow>
   sendsPerDay(campaignId: string, timezone: string): Promise<DaySends[]>
+  /**
+   * What the whole account sent on each of the last `days` calendar days,
+   * oldest first, zero-filled, in `timezone`. Feeds the dashboard's sparkline.
+   */
+  accountSendsPerDay(
+    userId: string,
+    timezone: string,
+    days: number,
+  ): Promise<{ day: string; sent: number }[]>
 }
 
 export function createStatsRepository(pool: Pool): StatsRepository {
@@ -99,6 +108,36 @@ export function createStatsRepository(pool: Pool): StatsRepository {
         oldestInWindowAt: row?.oldest_in_window ?? null,
         lastSentAt: row?.last_sent_at ?? null,
       }
+    },
+
+    async accountSendsPerDay(userId, timezone, days) {
+      // The series is generated in SQL so a quiet day is a zero rather than a
+      // gap: a sparkline that skips the days nothing was sent draws a steady
+      // line through a week of silence. The zone is a bound parameter, and the
+      // window a clamped integer, so neither is ever interpolated.
+      const span = Math.min(Math.max(Math.trunc(days), 1), 90)
+
+      const { rows } = await pool.query<{ day: string; sent: number }>(
+        `SELECT to_char(d, 'YYYY-MM-DD') AS day, coalesce(s.sent, 0)::int AS sent
+         FROM generate_series(
+                (now() AT TIME ZONE $2)::date - ($3::int - 1),
+                (now() AT TIME ZONE $2)::date,
+                interval '1 day'
+              ) AS d
+         LEFT JOIN (
+           SELECT (l.created_at AT TIME ZONE $2)::date AS day, count(*) AS sent
+           FROM logs l
+           JOIN campaigns c ON c.id = l.campaign_id
+           WHERE c.user_id = $1
+             AND l.event_type = 'sent'
+             AND l.created_at >= now() - ($3::int + 1) * interval '1 day'
+           GROUP BY 1
+         ) s ON s.day = d::date
+         ORDER BY d`,
+        [userId, timezone, span],
+      )
+
+      return rows
     },
 
     async sendsPerDay(campaignId, timezone) {

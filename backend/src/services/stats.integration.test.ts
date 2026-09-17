@@ -15,6 +15,7 @@ const enabled = Boolean(DATABASE_URL)
 
 let pool: pg.Pool
 let campaignId: string
+let userId: string
 const stamp = Date.now()
 
 before(async () => {
@@ -28,9 +29,10 @@ before(async () => {
     'INSERT INTO users (google_id, email) VALUES ($1, $2) RETURNING id',
     [`stats-itest-${String(stamp)}`, `stats-itest-${String(stamp)}@example.test`],
   )
+  userId = user.rows[0]?.id ?? ''
   const campaign = await pool.query<{ id: string }>(
     "INSERT INTO campaigns (user_id, name, status) VALUES ($1, 'Stats', 'running') RETURNING id",
-    [user.rows[0]?.id],
+    [userId],
   )
   const created = campaign.rows[0]
   assert.ok(created)
@@ -113,6 +115,27 @@ describe(
       const days = await createStatsRepository(pool).sendsPerDay(campaignId, 'UTC')
 
       assert.deepEqual(days.slice(0, 1), [{ day: '2026-07-01', sent: 1, failed: 1 }])
+    })
+
+    it('draws the account’s last two weeks day by day, quiet days included', async () => {
+      const days = await createStatsRepository(pool).accountSendsPerDay(
+        userId,
+        'Europe/Paris',
+        14,
+      )
+
+      // Every day is there, oldest first, so a sparkline never skips silence.
+      assert.equal(days.length, 14)
+      assert.deepEqual(
+        days.map((day) => day.day),
+        [...days.map((day) => day.day)].sort(),
+      )
+      // The recent send counts; the July one is outside the window, and the
+      // error is not a send.
+      assert.equal(
+        days.reduce((sum, day) => sum + day.sent, 0),
+        1,
+      )
     })
   },
 )
