@@ -43,8 +43,12 @@ export function Login() {
   }
 
   return (
+    // The whole page fits one laptop screen: past md the pitch and the three
+    // reassurances sit side by side instead of stacking, which is what pushed
+    // the footer below the fold. min-h rather than h, so a very short window
+    // scrolls instead of clipping the sign-in button.
     <div className="flex min-h-dvh flex-col">
-      <header className="flex items-center justify-between px-5 pt-5">
+      <header className="flex items-center justify-between px-5 pt-4">
         <span className="flex items-center gap-2">
           <Logo size={26} />
           <span className="font-display text-[15px] font-semibold tracking-tight">
@@ -54,60 +58,63 @@ export function Login() {
         <ThemeToggle />
       </header>
 
-      <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-5 py-12">
-        <h1 className="text-[32px] leading-tight font-semibold tracking-tight text-balance">
-          Vos candidatures, envoyées une par une.
-        </h1>
+      <main className="mx-auto grid w-full max-w-md flex-1 content-center gap-8 px-5 py-6 md:max-w-4xl md:grid-cols-[1.15fr_1fr] md:items-center md:gap-12">
+        <div>
+          <h1 className="text-[28px] leading-tight font-semibold tracking-tight text-balance sm:text-[32px]">
+            Vos candidatures, envoyées une par une.
+          </h1>
 
-        <p className="mt-3 text-[15px] leading-relaxed text-ink-muted">
-          Un message, une liste de contacts, et des envois étalés sur plusieurs jours
-          depuis votre propre compte Gmail — au rythme d’une personne, pas d’un robot.
-        </p>
-
-        {deleted && (
-          <div
-            role="status"
-            className="mt-6 enter rounded-xl border border-border bg-surface px-3.5 py-3 text-[13px]"
-          >
-            <p className="flex items-center gap-2 font-medium">
-              <Icon name="check-circle" size={15} className="text-success" />
-              Votre compte et toutes ses données ont été supprimés.
-            </p>
-            {!deleted.googleRevoked && (
-              // Said plainly, with the way to do it: the one step that could
-              // not be completed is the one the user can finish in a minute.
-              <p className="mt-2 leading-relaxed text-ink-muted">
-                Google n’a pas pu être prévenu. Retirez l’accès de Campaign Mailer depuis{' '}
-                <a
-                  href={GOOGLE_PERMISSIONS_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-accent underline underline-offset-2"
-                >
-                  les autorisations de votre compte Google
-                </a>
-                .
-              </p>
-            )}
-          </div>
-        )}
-
-        {failed && (
-          <p
-            role="alert"
-            className="mt-6 flex enter items-start gap-2 rounded-xl border border-danger/30 bg-danger-soft px-3.5 py-3 text-[13px] text-danger"
-          >
-            <Icon name="alert" size={15} className="mt-px shrink-0" />
-            La connexion avec Google n’a pas abouti. Réessayez, ou vérifiez que vous avez
-            bien autorisé l’accès.
+          <p className="mt-3 text-[15px] leading-relaxed text-ink-muted">
+            Un message, une liste de contacts, et des envois étalés sur plusieurs jours
+            depuis votre propre compte Gmail — au rythme d’une personne, pas d’un robot.
           </p>
-        )}
 
-        <div className="mt-8">
-          <GoogleSignInButton />
+          {deleted && (
+            <div
+              role="status"
+              className="mt-6 enter rounded-xl border border-border bg-surface px-3.5 py-3 text-[13px]"
+            >
+              <p className="flex items-center gap-2 font-medium">
+                <Icon name="check-circle" size={15} className="text-success" />
+                Votre compte et toutes ses données ont été supprimés.
+              </p>
+              {!deleted.googleRevoked && (
+                // Said plainly, with the way to do it: the one step that could
+                // not be completed is the one the user can finish in a minute.
+                <p className="mt-2 leading-relaxed text-ink-muted">
+                  Google n’a pas pu être prévenu. Retirez l’accès de Campaign Mailer
+                  depuis{' '}
+                  <a
+                    href={GOOGLE_PERMISSIONS_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-accent underline underline-offset-2"
+                  >
+                    les autorisations de votre compte Google
+                  </a>
+                  .
+                </p>
+              )}
+            </div>
+          )}
+
+          {failed && (
+            <p
+              role="alert"
+              className="mt-6 flex enter items-start gap-2 rounded-xl border border-danger/30 bg-danger-soft px-3.5 py-3 text-[13px] text-danger"
+            >
+              <Icon name="alert" size={15} className="mt-px shrink-0" />
+              La connexion avec Google n’a pas abouti. Réessayez, ou vérifiez que vous
+              avez bien autorisé l’accès.
+            </p>
+          )}
+
+          <div className="mt-6">
+            <GoogleSignInButton />
+          </div>
         </div>
 
-        <ul className="mt-8 space-y-3 border-t border-border pt-6">
+        <ul className="space-y-3 border-t border-border pt-6 md:rounded-2xl md:border md:bg-surface md:p-5">
           <Point icon="send">
             Les e-mails partent de <strong className="font-medium text-ink">votre</strong>{' '}
             adresse Gmail, avec vos réponses dans votre boîte.

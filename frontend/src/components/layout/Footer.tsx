@@ -22,7 +22,7 @@ const LEGAL = [
 export function Footer({ className = '' }: { className?: string }) {
   return (
     <footer className={`border-t border-border ${className}`}>
-      <div className="mx-auto flex max-w-6xl flex-col gap-4 px-5 py-6 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+      <div className="mx-auto flex max-w-6xl flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
         <div className="flex items-center gap-2.5">
           <Logo size={22} className="text-ink-muted" />
           <p className="text-[13px] text-ink-muted">
