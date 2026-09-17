@@ -60,7 +60,7 @@ export function Login() {
 
       <main className="mx-auto grid w-full max-w-md flex-1 content-center gap-6 px-5 py-4 sm:py-6 md:max-w-4xl md:grid-cols-[1.15fr_auto_1fr] md:items-center md:gap-12">
         <div>
-          <h1 className="text-[28px] leading-tight font-semibold tracking-tight text-balance sm:text-[32px]">
+          <h1 className="text-[35px] leading-tight font-semibold tracking-tight text-balance sm:text-[40px]">
             Vos Campagnes Mails, envoyées une par une.
           </h1>
 
