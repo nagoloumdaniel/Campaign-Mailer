@@ -19,6 +19,7 @@ import {
 } from '@/services/contacts'
 import { formatNumber } from '@/services/format'
 
+import { AddContactDialog } from './AddContactDialog'
 import { ImportDialog } from './ImportDialog'
 
 /**
@@ -77,6 +78,7 @@ export function ContactsSection({
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [adding, setAdding] = useState(false)
 
   const finished = campaignStatus === 'completed'
 
@@ -148,21 +150,33 @@ export function ContactsSection({
         }
         description={
           editable
-            ? 'Importez un CSV : les contacts s’ajoutent à la suite des précédents.'
+            ? 'Importez un CSV ou ajoutez une adresse à la main : les contacts s’ajoutent à la suite des précédents.'
             : 'La liste des destinataires de cette campagne.'
         }
         action={
           editable && (
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="upload"
-              onClick={() => {
-                setImporting(true)
-              }}
-            >
-              Importer
-            </Button>
+            <span className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="plus"
+                onClick={() => {
+                  setAdding(true)
+                }}
+              >
+                Ajouter
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="upload"
+                onClick={() => {
+                  setImporting(true)
+                }}
+              >
+                Importer
+              </Button>
+            </span>
           )
         }
       />
@@ -180,15 +194,29 @@ export function ContactsSection({
           className="mt-4"
           action={
             editable && (
-              <Button
-                variant="primary"
-                icon="upload"
-                onClick={() => {
-                  setImporting(true)
-                }}
-              >
-                Importer un fichier CSV
-              </Button>
+              <span className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  variant="primary"
+                  icon="upload"
+                  onClick={() => {
+                    setImporting(true)
+                  }}
+                >
+                  Importer un fichier CSV
+                </Button>
+                {/* Secondary, and second: a campaign is normally filled from a
+                    file, and adding hundreds of contacts one at a time is not
+                    a path to put first. */}
+                <Button
+                  variant="secondary"
+                  icon="plus"
+                  onClick={() => {
+                    setAdding(true)
+                  }}
+                >
+                  Ajouter un contact
+                </Button>
+              </span>
             )
           }
         />
@@ -378,6 +406,18 @@ export function ContactsSection({
           setImporting(false)
         }}
         onImported={() => {
+          onChanged()
+          void load()
+        }}
+      />
+
+      <AddContactDialog
+        open={adding}
+        campaignId={campaignId}
+        onClose={() => {
+          setAdding(false)
+        }}
+        onAdded={() => {
           onChanged()
           void load()
         }}

@@ -231,6 +231,7 @@ describe('POST one contact', () => {
     })
 
     assert.equal(res.status, 400)
+    assert.equal(await codeOf(res), 'invalid_email')
   })
 
   it('answers 409 on an address already there', async () => {
@@ -242,8 +243,29 @@ describe('POST one contact', () => {
     })
 
     assert.equal(res.status, 409)
+    // The code, not the sentence: a client tells this refusal apart from the
+    // one below to say which of them happened, and English prose is not a
+    // contract.
+    assert.equal(await codeOf(res), 'duplicate_email')
+  })
+
+  it('answers 409 once the campaign has left draft', async () => {
+    campaignStatus = 'running'
+
+    const res = await send('/', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'neuf@exemple.fr' }),
+    })
+
+    assert.equal(res.status, 409)
+    assert.equal(await codeOf(res), 'campaign_not_editable')
   })
 })
+
+/** The machine-readable reason a refusal carries, which clients match on. */
+async function codeOf(res: Response): Promise<string | undefined> {
+  return ((await res.json()) as { code?: string }).code
+}
 
 describe('PATCH a contact', () => {
   it('sets it aside', async () => {

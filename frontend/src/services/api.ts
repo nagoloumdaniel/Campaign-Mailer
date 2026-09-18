@@ -10,11 +10,18 @@
 
 export class ApiError extends Error {
   readonly status: number
+  /**
+   * The machine-readable reason, where the route carries one. The message is
+   * written for a developer and is in English; a screen that has to tell two
+   * refusals apart matches on this rather than on that prose.
+   */
+  readonly code: string | null
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.code = code
   }
 }
 
@@ -48,7 +55,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
         ? body.error
         : `Erreur ${String(response.status)}`
 
-    throw new ApiError(response.status, message)
+    const code =
+      body && typeof body === 'object' && 'code' in body && typeof body.code === 'string'
+        ? body.code
+        : null
+
+    throw new ApiError(response.status, message, code)
   }
 
   return body as T

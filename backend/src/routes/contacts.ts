@@ -129,7 +129,10 @@ export function createContactRouter({ campaigns, contacts }: ContactRouterDeps):
       const campaign = campaignOf(res)
 
       if (!canEditContent(campaign.status)) {
-        res.status(409).json({ error: 'This campaign no longer accepts new contacts' })
+        res.status(409).json({
+          error: 'This campaign no longer accepts new contacts',
+          code: 'campaign_not_editable',
+        })
         return
       }
 
@@ -139,6 +142,11 @@ export function createContactRouter({ campaigns, contacts }: ContactRouterDeps):
       if (!email) {
         res.status(400).json({
           error: 'Invalid request',
+          // The two ways this route can refuse both answer 409 or 400 with a
+          // sentence written for a developer. A client showing the person
+          // which of them happened would otherwise have to match on English
+          // prose, so each carries a code that is part of the contract.
+          code: 'invalid_email',
           details: [{ field: 'email', message: 'Not a valid address' }],
         })
         return
@@ -152,7 +160,10 @@ export function createContactRouter({ campaigns, contacts }: ContactRouterDeps):
       })
 
       if (!created) {
-        res.status(409).json({ error: 'This address is already in the campaign' })
+        res.status(409).json({
+          error: 'This address is already in the campaign',
+          code: 'duplicate_email',
+        })
         return
       }
 

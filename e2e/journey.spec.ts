@@ -91,6 +91,39 @@ test('a user prepares a campaign, launches it and follows it to the end', async 
     await expect(page.getByText('bob@example.test').first()).toBeVisible()
   })
 
+  await test.step('adds one contact by hand, and is refused a duplicate', async () => {
+    // Exact: the header's "Ajouter" would otherwise also match the dialog's
+    // "Ajouter le contact" and the confirmation's "Ajouter un autre contact".
+    await page.getByRole('button', { name: 'Ajouter', exact: true }).click()
+
+    const dialog = page.getByRole('dialog')
+    await dialog.getByLabel('Adresse e-mail').fill('cleo@example.test')
+    await dialog.getByLabel('Nom du contact').fill('Cléo')
+    await dialog.getByRole('button', { name: 'Ajouter le contact' }).click()
+
+    await expect(page.getByRole('heading', { name: 'Contact ajouté' })).toBeVisible()
+    await page.getByRole('button', { name: 'Ajouter un autre contact' }).click()
+
+    // The same address twice is the mistake this dialog invites, so the
+    // refusal is read under the field rather than in a toast.
+    await dialog.getByLabel('Adresse e-mail').fill('ana@example.test')
+    await dialog.getByRole('button', { name: 'Ajouter le contact' }).click()
+    await expect(
+      dialog.getByText('Cette adresse est déjà dans la campagne.'),
+    ).toBeVisible()
+
+    await dialog.getByRole('button', { name: 'Annuler' }).click()
+    await expect(page.getByRole('heading', { name: 'Contacts (3)' })).toBeVisible()
+  })
+
+  await test.step('removes the contact added by hand', async () => {
+    // Back to the two imported ones, so the rest of the journey counts what
+    // the file held.
+    await page.getByRole('button', { name: 'Supprimer cleo@example.test' }).click()
+
+    await expect(page.getByRole('heading', { name: 'Contacts (2)' })).toBeVisible()
+  })
+
   await test.step('the preview switches to the first imported contact', async () => {
     await expect(
       page.getByRole('region', { name: 'Aperçu' }).getByText('ana@example.test'),
