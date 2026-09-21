@@ -16,7 +16,7 @@ Il vous faut :
 - une **liste de contacts**, dans un fichier CSV, avec au minimum une colonne d'adresses e-mail ;
 - éventuellement une **pièce jointe** : un CV ou un document, en PDF ou Word, 10 Mo au maximum.
 
-L'application est à l'adresse <https://campaign-mailer-app.vercel.app>.
+L'application est à l'adresse <https://campaignmailer.vercel.app>.
 
 Pendant la bêta, l'accès est réservé aux adresses enregistrées comme testeurs. Si Google affiche « accès bloqué » ou « application non validée », c'est que votre adresse n'a pas encore été ajoutée : signalez-le.
 
