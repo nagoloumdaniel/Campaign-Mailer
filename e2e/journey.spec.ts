@@ -232,6 +232,31 @@ test('a user prepares a campaign, launches it and follows it to the end', async 
     expect(csv).toContain('"ana@example.test"')
   })
 
+  await test.step('imports a file into the contacts, each address once', async () => {
+    await page.getByRole('link', { name: 'Contacts', exact: true }).click()
+    await page.getByRole('button', { name: 'Importer un fichier' }).click()
+
+    const dialog = page.getByRole('dialog')
+    await dialog.locator('input[type="file"]').setInputFiles({
+      name: 'carnet.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(
+        ['email,nom', 'dora@example.test,Dora', 'ana@example.test,Autre nom'].join(
+          String.fromCharCode(10),
+        ),
+      ),
+    })
+    await dialog.getByRole('button', { name: 'Importer 2 lignes' }).click()
+
+    // Dora is new; Ana was already there and keeps her name.
+    await expect(
+      page.getByRole('heading', { name: '1 nouveau contact ajouté' }),
+    ).toBeVisible()
+    await page.getByRole('button', { name: 'Terminé' }).click()
+    await expect(page.getByText('4 contacts au total.')).toBeVisible()
+    await expect(page.getByRole('cell', { name: 'Ana Lopez' })).toBeVisible()
+  })
+
   await test.step('the history leads with the campaigns, and keeps what was sent', async () => {
     await page.getByRole('link', { name: 'Historique' }).click()
 

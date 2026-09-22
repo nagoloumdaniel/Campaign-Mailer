@@ -89,6 +89,14 @@ export interface AddressBookRepository {
   add(userId: string, details: ContactDetails): Promise<WriteOutcome>
   update(userId: string, id: string, details: ContactDetails): Promise<WriteOutcome>
   remove(userId: string, id: string): Promise<boolean>
+  /**
+   * Files a batch of checked rows from a CSV. A new address becomes an entry;
+   * a known one keeps its values and only its empty fields are filled.
+   */
+  importRows(
+    userId: string,
+    rows: readonly ContactDetails[],
+  ): Promise<{ imported: number; known: number }>
   /** Copies entries into one of the account's drafts, as recipients. */
   copyToCampaign(
     userId: string,
@@ -374,6 +382,37 @@ export function createAddressBookRepository(pool: Pool): AddressBookRepository {
       } finally {
         client.release()
       }
+    },
+
+    async importRows(userId, rows) {
+      if (rows.length === 0) {
+        return { imported: 0, known: 0 }
+      }
+
+      // One statement for the batch. `xmax = 0` is true for a row this
+      // statement inserted and false for one it updated: that is how new
+      // addresses are told from known ones without a second query.
+      const { rows: written } = await pool.query<{ inserted: boolean }>(
+        `INSERT INTO address_book (user_id, email, contact_name, company_name, salutation, source)
+         SELECT $1, r.email, r.contact_name, r.company_name, r.salutation, 'csv'
+         FROM unnest($2::text[], $3::text[], $4::text[], $5::text[])
+           AS r(email, contact_name, company_name, salutation)
+         ON CONFLICT (user_id, lower(email)) DO UPDATE
+           SET contact_name = COALESCE(address_book.contact_name, EXCLUDED.contact_name),
+               company_name = COALESCE(address_book.company_name, EXCLUDED.company_name),
+               salutation   = COALESCE(address_book.salutation, EXCLUDED.salutation)
+         RETURNING (xmax = 0) AS inserted`,
+        [
+          userId,
+          rows.map((row) => row.email),
+          rows.map((row) => row.contact_name),
+          rows.map((row) => row.company_name),
+          rows.map((row) => row.salutation),
+        ],
+      )
+
+      const imported = written.filter((row) => row.inserted).length
+      return { imported, known: written.length - imported }
     },
 
     async copyToCampaign(userId, campaignId, ids) {

@@ -96,17 +96,30 @@ function guessMapping(columns: string[]): Record<FieldKey, string> {
 export function ImportDialog({
   open,
   campaignId,
-  existingCount,
+  existingCount = 0,
   onClose,
   onImported,
+  importRows,
 }: {
   open: boolean
-  campaignId: string
+  /** The campaign the rows go into, unless `importRows` sends them elsewhere. */
+  campaignId?: string | undefined
   /** How many contacts the campaign already holds, so the dialog can say "ajoutés à". */
-  existingCount: number
+  existingCount?: number
   onClose: () => void
   onImported: () => void
+  /**
+   * Sends the mapped rows somewhere other than a campaign: the Contacts page
+   * imports into the account's contacts with the very same dialog.
+   */
+  importRows?:
+    | ((
+        rows: MappedRow[],
+        onProgress: (done: number, total: number) => void,
+      ) => Promise<ImportReport>)
+    | undefined
 }) {
+  const intoBook = importRows !== undefined
   const inputId = useId()
   const [parsed, setParsed] = useState<Parsed | null>(null)
   const [mapping, setMapping] = useState<Record<FieldKey, string>>({
@@ -178,11 +191,12 @@ export function ImportDialog({
         return mapped
       })
 
-      const result = await contactsApi.import(campaignId, rows, {
-        onProgress: (done, total) => {
-          setProgress(Math.round((done / total) * 100))
-        },
-      })
+      const onProgress = (done: number, total: number) => {
+        setProgress(Math.round((done / total) * 100))
+      }
+      const result = importRows
+        ? await importRows(rows, onProgress)
+        : await contactsApi.import(campaignId ?? '', rows, { onProgress })
 
       setReport(result)
       setParsed(null)
@@ -212,11 +226,20 @@ export function ImportDialog({
         size="md"
         title={`${countOf(report.imported, 'nouveau contact', 'nouveaux contacts')} ajouté${report.imported > 1 ? 's' : ''}`}
         description={
-          <>
-            Ils ont été <strong className="font-semibold text-ink">ajoutés</strong> à la
-            suite de vos contacts existants — rien n’a été remplacé. La campagne en compte
-            maintenant {formatNumber(existingCount + report.imported)}.
-          </>
+          intoBook ? (
+            <>
+              Ils ont été <strong className="font-semibold text-ink">ajoutés</strong> à
+              vos contacts.
+              {(report.known ?? 0) > 0 &&
+                ` ${countOf(report.known ?? 0, 'adresse était', 'adresses étaient')} déjà dans vos contacts : leurs informations sont conservées, seuls les champs vides ont été complétés.`}
+            </>
+          ) : (
+            <>
+              Ils ont été <strong className="font-semibold text-ink">ajoutés</strong> à la
+              suite de vos contacts existants — rien n’a été remplacé. La campagne en
+              compte maintenant {formatNumber(existingCount + report.imported)}.
+            </>
+          )
         }
         footer={
           <>
@@ -255,7 +278,11 @@ export function ImportDialog({
       icon="users"
       size="md"
       title="Importer des contacts"
-      description="Les contacts du fichier seront ajoutés à la suite de ceux que la campagne contient déjà."
+      description={
+        intoBook
+          ? 'Chaque adresse du fichier rejoint vos contacts, une seule fois. Une adresse déjà présente garde ses informations.'
+          : 'Les contacts du fichier seront ajoutés à la suite de ceux que la campagne contient déjà.'
+      }
       footer={
         parsed && (
           <>

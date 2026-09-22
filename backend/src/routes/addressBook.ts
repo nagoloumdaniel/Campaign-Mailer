@@ -17,7 +17,8 @@ import {
   type ContactDetails,
   type WriteOutcome,
 } from '../services/addressBook.js'
-import { normaliseEmail } from '../services/contactImport.js'
+import { importContactsSchema, type ImportContactsInput } from '../schemas/contact.js'
+import { collectContacts, normaliseEmail } from '../services/contactImport.js'
 
 /**
  * /api/contacts — the account's address book (services/addressBook.ts): one
@@ -104,6 +105,32 @@ export function createAddressBookRouter({
       } else {
         res.status(201).json({ imported: outcome.imported })
       }
+    })().catch(next)
+  })
+
+  /**
+   * A CSV file straight into the contacts, without a campaign. Rows arrive
+   * mapped to the four fields, as for a campaign's import, and are checked
+   * again here: an invalid address or a line repeated in the file is set aside
+   * with its line number. An address already in the contacts is not a
+   * rejection: it keeps its values, its empty fields are filled, and the
+   * report counts it as known.
+   */
+  router.post('/import', validateBody(importContactsSchema), (req, res, next) => {
+    void (async () => {
+      const input = req.body as ImportContactsInput
+      const result = collectContacts(input.rows, {
+        ...(input.first_line === undefined ? {} : { firstLine: input.first_line }),
+      })
+
+      const { imported, known } = await addressBook.importRows(
+        signedInUserId(req),
+        result.accepted,
+      )
+
+      res.status(201).json({
+        report: { read: result.summary.read, imported, known, rejected: result.rejected },
+      })
     })().catch(next)
   })
 

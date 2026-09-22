@@ -35,6 +35,7 @@ let lastQuery: AddressBookQuery | null = null
 let lastExport: Omit<AddressBookQuery, 'limit' | 'offset'> | null = null
 let lastDetails: ContactDetails | null = null
 let outcome: WriteOutcome = { kind: 'saved', contact: row('a@exemple.fr') }
+let imported: readonly ContactDetails[] = []
 
 const addressBook: AddressBookRepository = {
   list: (_userId, query) => {
@@ -57,6 +58,11 @@ const addressBook: AddressBookRepository = {
     return Promise.resolve(outcome)
   },
   remove: (_userId, id) => Promise.resolve(id === CONTACT),
+  importRows: (_userId, rows) => {
+    imported = rows
+    // The first address is taken as already known, the others as new.
+    return Promise.resolve({ imported: rows.length - 1, known: 1 })
+  },
   copyToCampaign: (_userId, campaignId, ids) =>
     Promise.resolve(
       campaignId === CAMPAIGN
@@ -208,6 +214,57 @@ describe('GET /contacts/export', () => {
 
   it('refuses an unknown zone', async () => {
     assert.equal((await call('/export?timezone=Nulle/Part')).status, 400)
+  })
+})
+
+describe('POST /contacts/import', () => {
+  it('files the valid rows, sets the others aside with their line, counts the known', async () => {
+    const res = await call('/import', {
+      method: 'POST',
+      body: JSON.stringify({
+        first_line: 2,
+        rows: [
+          { email: 'Ana@Exemple.fr', contact_name: 'Ana' },
+          { email: 'pas une adresse' },
+          { email: 'bob@exemple.fr', company_name: 'Globex' },
+          { email: 'ana@exemple.fr' },
+        ],
+      }),
+    })
+
+    assert.equal(res.status, 201)
+    const { report } = (await res.json()) as {
+      report: {
+        read: number
+        imported: number
+        known: number
+        rejected: { line: number; reason: string }[]
+      }
+    }
+
+    assert.deepEqual(
+      imported.map((row) => row.email),
+      ['ana@exemple.fr', 'bob@exemple.fr'],
+    )
+    assert.equal(report.read, 4)
+    assert.equal(report.imported, 1)
+    assert.equal(report.known, 1)
+    assert.deepEqual(
+      report.rejected.map((row) => [row.line, row.reason]),
+      [
+        [3, 'invalid_email'],
+        [5, 'duplicate_in_file'],
+      ],
+    )
+  })
+
+  it('refuses a row with a field that is not one of the four', async () => {
+    const res = await call('/import', {
+      method: 'POST',
+      body: JSON.stringify({ rows: [{ email: 'a@exemple.fr', campaign: 'x' }] }),
+    })
+
+    assert.equal(res.status, 400)
   })
 })
 

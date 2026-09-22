@@ -25,6 +25,8 @@ export interface RejectedRow {
 export interface ImportReport {
   read: number
   imported: number
+  /** Into the contacts page only: addresses already there, whose blanks were filled. */
+  known?: number
   rejected: RejectedRow[]
 }
 

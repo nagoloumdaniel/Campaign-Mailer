@@ -300,5 +300,22 @@ describe(
       const copied = await recipients(targetId)
       assert.equal(copied[0]?.book_id, ids[0])
     })
+
+    it('imports a file: new addresses become contacts, known ones only fill their blanks', async () => {
+      const result = await book.importRows(userId, [
+        details('fresh@example.test', { contact_name: 'Frais' }),
+        details('BOB@example.test', { contact_name: 'Robert', salutation: 'Monsieur' }),
+      ])
+
+      assert.deepEqual(result, { imported: 1, known: 1 })
+
+      const { contacts } = await book.list(userId, query({ search: 'example.test' }))
+      const fresh = contacts.find((row) => row.email === 'fresh@example.test')
+      assert.equal(fresh?.source, 'csv')
+
+      const bob = contacts.find((row) => row.email === 'bob@example.test')
+      assert.equal(bob?.contact_name, 'Bob', 'a known name is not overwritten')
+      assert.equal(bob.salutation, 'Monsieur', 'an empty salutation is filled')
+    })
   },
 )

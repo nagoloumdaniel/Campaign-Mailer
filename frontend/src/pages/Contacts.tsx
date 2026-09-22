@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { AddContactDialog } from '@/components/campaign/AddContactDialog'
+import { ImportDialog } from '@/components/campaign/ImportDialog'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { HistorySkeleton } from '@/components/skeletons/PageSkeletons'
 import { Badge, type BadgeTone } from '@/components/ui/Badge'
@@ -74,6 +75,7 @@ type Load = { state: 'loading' } | { state: 'ready' } | { state: 'failed' }
 
 type Dialog =
   | { kind: 'create' }
+  | { kind: 'import' }
   | { kind: 'edit'; contact: BookContact }
   | { kind: 'delete'; contact: BookContact }
   | { kind: 'delete-selection' }
@@ -253,6 +255,15 @@ export function Contacts() {
               </AnchorButton>
             )}
             <Button
+              variant="secondary"
+              icon="upload"
+              onClick={() => {
+                setDialog({ kind: 'import' })
+              }}
+            >
+              Importer un fichier
+            </Button>
+            <Button
               variant="primary"
               icon="plus"
               onClick={() => {
@@ -274,17 +285,28 @@ export function Contacts() {
         <EmptyState
           icon="users"
           title="Aucun contact pour le moment"
-          description="Ajoutez un contact, ou importez un fichier CSV dans une campagne : chaque adresse apparaîtra ici, une seule fois."
+          description="Importez un fichier CSV ou ajoutez un contact à la main : chaque adresse apparaîtra ici, une seule fois."
           action={
-            <Button
-              variant="primary"
-              icon="plus"
-              onClick={() => {
-                setDialog({ kind: 'create' })
-              }}
-            >
-              Ajouter un contact
-            </Button>
+            <span className="flex flex-wrap items-center justify-center gap-2">
+              <Button
+                variant="primary"
+                icon="upload"
+                onClick={() => {
+                  setDialog({ kind: 'import' })
+                }}
+              >
+                Importer un fichier CSV
+              </Button>
+              <Button
+                variant="secondary"
+                icon="plus"
+                onClick={() => {
+                  setDialog({ kind: 'create' })
+                }}
+              >
+                Ajouter un contact
+              </Button>
+            </span>
           }
         />
       ) : (
@@ -549,6 +571,19 @@ export function Contacts() {
           }}
         />
       )}
+
+      {/* The campaign's own import dialog, pointed at the contacts: the same
+          file handling, column mapping and line-numbered report. */}
+      <ImportDialog
+        open={dialog?.kind === 'import'}
+        importRows={(rows, onProgress) => addressBookApi.importRows(rows, onProgress)}
+        onClose={() => {
+          setDialog(null)
+        }}
+        onImported={() => {
+          void fetchPage()
+        }}
+      />
 
       {dialog?.kind === 'campaign-from-selection' && (
         <CampaignFromSelectionDialog

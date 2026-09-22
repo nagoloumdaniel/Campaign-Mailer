@@ -1,5 +1,5 @@
 import { api } from './api'
-import type { MappedRow } from './contacts'
+import { IMPORT_BATCH_LIMIT, type ImportReport, type MappedRow } from './contacts'
 
 /**
  * The account's address book: one entry per email address, whatever brought
@@ -73,6 +73,39 @@ export const addressBookApi = {
     api.patch<{ contact: BookContact }>(`/contacts/${id}`, fields).then((r) => r.contact),
 
   remove: (id: string) => api.delete(`/contacts/${id}`),
+
+  /**
+   * A CSV file into the contacts, in slices the server accepts (the same as a
+   * campaign's import), with the reports merged into one.
+   */
+  async importRows(
+    rows: MappedRow[],
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<ImportReport> {
+    const merged: Required<ImportReport> = {
+      read: 0,
+      imported: 0,
+      known: 0,
+      rejected: [],
+    }
+
+    for (let start = 0; start < rows.length; start += IMPORT_BATCH_LIMIT) {
+      const slice = rows.slice(start, start + IMPORT_BATCH_LIMIT)
+      const { report } = await api.post<{ report: Required<ImportReport> }>(
+        '/contacts/import',
+        // Line 1 is the header, so the first row is line 2 of the spreadsheet.
+        { rows: slice, first_line: 2 + start },
+      )
+
+      merged.read += report.read
+      merged.imported += report.imported
+      merged.known += report.known
+      merged.rejected.push(...report.rejected)
+      onProgress?.(Math.min(start + slice.length, rows.length), rows.length)
+    }
+
+    return merged
+  },
 
   /** A plain link: the browser downloads, the session cookie rides along. */
   exportUrl: (filters: Filters) => {

@@ -107,6 +107,9 @@ export function createApiRouter(deps: ApiRouterDeps = {}): Router {
   )
   apiRouter.use(
     '/contacts',
+    // A batch of CSV rows is larger than the default body limit, as for a
+    // campaign's import.
+    express.json({ limit: '5mb' }),
     createAddressBookRouter({ addressBook: createAddressBookRepository(pool) }),
   )
   const statsRepository = createStatsRepository(pool)
