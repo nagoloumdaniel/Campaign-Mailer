@@ -18,22 +18,16 @@ const ALICE = 'aaaaaaaa-1111-4111-8111-111111111111'
 const CAMPAIGN = 'cccccccc-3333-4333-8333-333333333333'
 const CONTACT = 'dddddddd-4444-4444-8444-444444444444'
 
-function row(email: string): AddressBookRow {
+function row(email: string, overrides: Partial<AddressBookRow> = {}): AddressBookRow {
   return {
     id: CONTACT,
-    campaign_id: CAMPAIGN,
-    campaign_name: 'Alternance',
-    campaign_status: 'draft',
-    campaign_type: 'alternance',
     email,
     contact_name: 'Ana',
     company_name: 'Acme',
     salutation: null,
-    status: 'pending',
     source: 'csv',
-    error_message: null,
-    created_at: new Date('2026-09-22T10:00:00Z'),
-    sent_at: null,
+    created_at: new Date('2026-09-22T08:30:00Z'),
+    ...overrides,
   }
 }
 
@@ -47,27 +41,22 @@ const addressBook: AddressBookRepository = {
     lastQuery = query
     return Promise.resolve({ contacts: [row('a@exemple.fr')], total: 1 })
   },
-  add: (_userId, _campaignId, details) => {
-    lastDetails = details
-    return Promise.resolve(outcome)
-  },
-  update: (_userId, _contactId, details) => {
-    lastDetails = details
-    return Promise.resolve(outcome)
-  },
   all: (_userId, query) => {
     lastExport = query
     return Promise.resolve([
       row('a@exemple.fr'),
-      {
-        ...row('=cmd@exemple.fr'),
-        company_name: '=HYPERLINK("x")',
-        status: 'sent',
-        sent_at: new Date('2026-09-22T08:30:00Z'),
-      },
+      row('=cmd@exemple.fr', { company_name: '=HYPERLINK("x")', source: 'mailfind' }),
     ])
   },
-  remove: (_userId, contactId) => Promise.resolve(contactId === CONTACT),
+  add: (_userId, details) => {
+    lastDetails = details
+    return Promise.resolve(outcome)
+  },
+  update: (_userId, _id, details) => {
+    lastDetails = details
+    return Promise.resolve(outcome)
+  },
+  remove: (_userId, id) => Promise.resolve(id === CONTACT),
   copyToCampaign: (_userId, campaignId, ids) =>
     Promise.resolve(
       campaignId === CAMPAIGN
@@ -111,6 +100,7 @@ after(async () => {
 beforeEach(() => {
   signedInAs = ALICE
   lastQuery = null
+  lastExport = null
   lastDetails = null
   outcome = { kind: 'saved', contact: row('a@exemple.fr') }
 })
@@ -127,61 +117,61 @@ describe('GET /contacts', () => {
     assert.equal((await call('')).status, 401)
   })
 
-  it('sorts by company, ascending, 25 a page, unless asked otherwise', async () => {
-    const res = await call('')
-    assert.equal(res.status, 200)
+  it('sorts by name, ascending, 25 a page, unless asked otherwise', async () => {
+    assert.equal((await call('')).status, 200)
     assert.deepEqual(lastQuery, {
-      sort: 'company',
+      sort: 'name',
       order: 'asc',
       limit: 25,
       offset: 0,
-      unique: false,
-      campaignId: undefined,
       excludeCampaignId: undefined,
     })
   })
 
-  it('passes the search, the filters, the sort and the page through', async () => {
+  it('passes the search, the origin, the sort, the page and a picker’s campaign', async () => {
     await call(
-      `?search=acme&status=sent&source=mailfind&campaign_id=${CAMPAIGN}&sort=name&order=desc&limit=10&offset=20`,
+      `?search=acme&source=mailfind&sort=company&order=desc&limit=10&offset=20&exclude_campaign_id=${CAMPAIGN}`,
     )
 
     assert.deepEqual(lastQuery, {
       search: 'acme',
-      status: 'sent',
       source: 'mailfind',
-      campaignId: CAMPAIGN,
-      unique: false,
-      excludeCampaignId: undefined,
-      sort: 'name',
+      sort: 'company',
       order: 'desc',
       limit: 10,
       offset: 20,
+      excludeCampaignId: CAMPAIGN,
     })
   })
 
-  it('refuses a sort that is not on the list', async () => {
+  it('refuses a sort or a filter that is not on the list', async () => {
     assert.equal((await call('?sort=password')).status, 400)
+    assert.equal((await call('?status=sent')).status, 400)
   })
 
-  it('answers each contact with its campaign', async () => {
+  it('answers the contact’s own details, and nothing about campaigns', async () => {
     const body = (await (await call('')).json()) as {
-      contacts: { campaign: { name: string }; source: string }[]
+      contacts: Record<string, unknown>[]
       total: number
     }
 
-    const [first] = body.contacts
     assert.equal(body.total, 1)
-    assert.ok(first)
-    assert.equal(first.campaign.name, 'Alternance')
-    assert.equal(first.source, 'csv')
+    assert.deepEqual(Object.keys(body.contacts[0] ?? {}).sort(), [
+      'companyName',
+      'contactName',
+      'createdAt',
+      'email',
+      'id',
+      'salutation',
+      'source',
+    ])
   })
 })
 
 describe('GET /contacts/export', () => {
   it('exports every contact the filters match, not one page', async () => {
     const res = await call(
-      '/export?search=acme&sort=name&order=desc&timezone=Europe/Paris',
+      '/export?search=acme&sort=email&order=desc&timezone=Europe/Paris',
     )
 
     assert.equal(res.status, 200)
@@ -189,15 +179,13 @@ describe('GET /contacts/export', () => {
     assert.equal(res.headers.get('cache-control'), 'no-store')
     assert.deepEqual(lastExport, {
       search: 'acme',
-      sort: 'name',
+      sort: 'email',
       order: 'desc',
-      unique: false,
-      campaignId: undefined,
       excludeCampaignId: undefined,
     })
   })
 
-  it('carries every characteristic, dates in the reader’s zone, formulas neutralised', async () => {
+  it('carries the page’s columns, dates in the reader’s zone, formulas neutralised', async () => {
     const bytes = new Uint8Array(
       await (await call('/export?timezone=Europe/Paris')).arrayBuffer(),
     )
@@ -205,20 +193,17 @@ describe('GET /contacts/export', () => {
     assert.deepEqual([...bytes.slice(0, 3)], [0xef, 0xbb, 0xbf], 'a BOM, for Excel')
     const [header, first, second] = new TextDecoder().decode(bytes).split('\r\n')
 
-    assert.equal(
-      header,
-      '"adresse","contact","entreprise","civilite","statut","origine","campagne","type_campagne","statut_campagne","ajoute_le","envoye_le","erreur"',
-    )
-    assert.match(
-      first ?? '',
-      /^"a@exemple\.fr","Ana","Acme","","en attente","import CSV","Alternance",/,
-    )
+    assert.equal(header, '"nom","email","entreprise","civilite","ajoute_le","origine"')
     // 08:30 UTC is 10:30 in Paris in September.
-    assert.match(second ?? '', /"2026-09-22 10:30:00"/)
+    assert.equal(
+      first,
+      '"Ana","a@exemple.fr","Acme","","2026-09-22 10:30:00","import CSV"',
+    )
     assert.ok(
       !(second ?? '').includes('"=HYPERLINK'),
       'a formula must not reach a spreadsheet as one',
     )
+    assert.match(second ?? '', /"MailFind"$/)
   })
 
   it('refuses an unknown zone', async () => {
@@ -257,22 +242,13 @@ describe('POST /contacts/copy', () => {
 
     assert.equal(res.status, 400)
   })
-
-  it('reads unique and exclude_campaign_id for a picker', async () => {
-    await call(`?unique=true&exclude_campaign_id=${CAMPAIGN}`)
-    const received = lastQuery
-    assert.ok(received)
-    assert.equal(received.unique, true)
-    assert.equal(received.excludeCampaignId, CAMPAIGN)
-  })
 })
 
 describe('writing', () => {
-  it('creates a contact with a normalised address and blanks as null', async () => {
+  it('adds a contact with the four fields, the address normalised, blanks as null', async () => {
     const res = await call('', {
       method: 'POST',
       body: JSON.stringify({
-        campaign_id: CAMPAIGN,
         email: '  Ana@Exemple.FR ',
         contact_name: 'Ana',
         company_name: '   ',
@@ -288,34 +264,34 @@ describe('writing', () => {
     })
   })
 
+  it('refuses a field that is not one of the four', async () => {
+    const res = await call('', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'a@exemple.fr', campaign_id: CAMPAIGN }),
+    })
+
+    assert.equal(res.status, 400)
+  })
+
   it('refuses an address that is not one, with a code', async () => {
     const res = await call('', {
       method: 'POST',
-      body: JSON.stringify({ campaign_id: CAMPAIGN, email: 'pas une adresse' }),
+      body: JSON.stringify({ email: 'pas une adresse' }),
     })
 
     assert.equal(res.status, 400)
     assert.equal(((await res.json()) as { code: string }).code, 'invalid_email')
   })
 
-  it('says why a write was refused, with a code', async () => {
-    outcome = { kind: 'not_editable' }
-    const launched = await call(`/${CONTACT}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ email: 'a@exemple.fr' }),
-    })
-    assert.equal(launched.status, 409)
-    assert.equal(
-      ((await launched.json()) as { code: string }).code,
-      'campaign_not_editable',
-    )
-
+  it('says an address is already in the book, with a code', async () => {
     outcome = { kind: 'duplicate' }
-    const twice = await call(`/${CONTACT}`, {
+    const res = await call(`/${CONTACT}`, {
       method: 'PATCH',
       body: JSON.stringify({ email: 'a@exemple.fr' }),
     })
-    assert.equal(((await twice.json()) as { code: string }).code, 'duplicate_email')
+
+    assert.equal(res.status, 409)
+    assert.equal(((await res.json()) as { code: string }).code, 'duplicate_email')
 
     outcome = { kind: 'not_found' }
     assert.equal(

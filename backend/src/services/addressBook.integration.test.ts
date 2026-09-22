@@ -12,9 +12,10 @@ import {
 /**
  * The address book against a real PostgreSQL.
  *
- * Its rules live in SQL: the owner check in every statement, the draft check
- * inside the write, the duplicate refused by the unique index, the order of
- * each sort. A fake would only repeat what the test assumes.
+ * Its rules live in SQL: the trigger that files every new recipient under one
+ * entry per address, the owner check in every statement, the edit that reaches
+ * only the sends to come, the removal that never touches history. A fake would
+ * only repeat what the test assumes.
  *
  * Skipped when DATABASE_URL is absent. Rows are removed by their exact Google
  * id, so a file running beside this one keeps its own.
@@ -29,15 +30,12 @@ const otherGoogleId = `itest-book-other-${stamp}`
 let pool: pg.Pool
 let book: AddressBookRepository
 let userId: string
-let otherUserId: string
 let draftId: string
-let launchedId: string
+let runningId: string
 let theirsId: string
 
-const NOBODY = '00000000-0000-4000-8000-000000000000'
-
 const query = (overrides: Partial<AddressBookQuery> = {}): AddressBookQuery => ({
-  sort: 'company',
+  sort: 'name',
   order: 'asc',
   limit: 50,
   offset: 0,
@@ -51,6 +49,28 @@ const details = (email: string, fields: Record<string, string | null> = {}) => (
   salutation: null,
   ...fields,
 })
+
+async function entryId(email: string): Promise<string> {
+  const { contacts } = await book.list(userId, query({ search: email }))
+  const found = contacts.find((row) => row.email === email)
+  assert.ok(found, `${email} should be in the book`)
+  return found.id
+}
+
+async function recipients(campaignId: string) {
+  const { rows } = await pool.query<{
+    email: string
+    contact_name: string | null
+    company_name: string | null
+    status: string
+    book_id: string | null
+  }>(
+    `SELECT email, contact_name, company_name, status, book_id
+     FROM contacts WHERE campaign_id = $1 ORDER BY email`,
+    [campaignId],
+  )
+  return rows
+}
 
 before(async () => {
   if (!enabled) {
@@ -71,27 +91,27 @@ before(async () => {
   )
   assert.ok(users[0] && users[1])
   userId = users[0].id
-  otherUserId = users[1].id
 
   const { rows: campaigns } = await pool.query<{ id: string }>(
     `INSERT INTO campaigns (user_id, name, status) VALUES
-       ($1, 'Brouillon', 'draft'), ($1, 'Lancée', 'running'), ($2, 'La leur', 'draft')
+       ($1, 'Brouillon', 'draft'), ($1, 'En cours', 'running'), ($2, 'La leur', 'draft')
      RETURNING id`,
-    [userId, otherUserId],
+    [userId, users[1].id],
   )
   assert.ok(campaigns[0] && campaigns[1] && campaigns[2])
   draftId = campaigns[0].id
-  launchedId = campaigns[1].id
+  runningId = campaigns[1].id
   theirsId = campaigns[2].id
 
+  // Plain INSERTs, as every import path makes them: the trigger files them.
   await pool.query(
     `INSERT INTO contacts (campaign_id, email, contact_name, company_name, status, source) VALUES
        ($1, 'zoe@example.test', 'Zoé', 'acme', 'pending', 'csv'),
        ($1, 'bob@example.test', 'Bob', 'Globex', 'pending', 'mailfind'),
-       ($2, 'ana@example.test', 'Ana', 'Acme', 'sent', 'csv'),
-       ($2, 'nemo@example.test', NULL, NULL, 'pending', 'manual'),
+       ($2, 'ZOE@example.test', NULL, NULL, 'pending', 'csv'),
+       ($2, 'ana@example.test', 'Ana', NULL, 'sent', 'csv'),
        ($3, 'them@example.test', 'Eux', 'Aardvark', 'pending', 'csv')`,
-    [draftId, launchedId, theirsId],
+    [draftId, runningId, theirsId],
   )
 })
 
@@ -100,7 +120,7 @@ after(async () => {
     return
   }
 
-  // The cascade takes the campaigns and the contacts with the accounts.
+  // The cascade takes the campaigns, the contacts and the book with the accounts.
   await pool.query('DELETE FROM users WHERE google_id = ANY($1)', [
     [googleId, otherGoogleId],
   ])
@@ -111,190 +131,174 @@ describe(
   'the address book',
   { skip: enabled ? false : 'DATABASE_URL is not set' },
   () => {
-    it('lists every campaign’s contacts of the account, and no one else’s', async () => {
+    it('holds one entry per address, whatever campaign or case brought it', async () => {
       const { contacts, total } = await book.list(userId, query())
 
-      assert.equal(total, 4)
-      assert.ok(contacts.every((row) => row.email !== 'them@example.test'))
-    })
-
-    it('sorts by company without regard to case, empty companies last', async () => {
-      const { contacts } = await book.list(userId, query({ sort: 'company' }))
-
+      assert.equal(total, 3)
       assert.deepEqual(
         contacts.map((row) => row.email),
-        ['ana@example.test', 'zoe@example.test', 'bob@example.test', 'nemo@example.test'],
+        ['ana@example.test', 'bob@example.test', 'zoe@example.test'],
       )
     })
 
-    it('keeps empty companies last when the order is reversed', async () => {
-      const { contacts } = await book.list(
-        userId,
-        query({ sort: 'company', order: 'desc' }),
-      )
+    it('links every recipient to its entry, and fills the recipient’s blanks from it', async () => {
+      const running = await recipients(runningId)
+      const zoe = running.find((row) => row.email === 'ZOE@example.test')
 
-      assert.equal(contacts[0]?.email, 'bob@example.test')
-      assert.equal(contacts.at(-1)?.email, 'nemo@example.test')
+      assert.ok(zoe?.book_id)
+      assert.equal(zoe.book_id, await entryId('zoe@example.test'))
+      assert.equal(zoe.contact_name, 'Zoé', 'the import left it empty; the book had it')
     })
 
-    it('sorts by name, by address and by campaign', async () => {
-      const byName = await book.list(userId, query({ sort: 'name' }))
-      assert.deepEqual(
-        byName.contacts.map((row) => row.contact_name),
-        ['Ana', 'Bob', 'Zoé', null],
+    it('keeps an entry’s values on a later import and fills only its empty fields', async () => {
+      await pool.query(
+        `INSERT INTO contacts (campaign_id, email, contact_name, company_name)
+       VALUES ($1, 'ana@example.test', 'Anne', 'Acme')`,
+        [draftId],
       )
 
-      const byEmail = await book.list(userId, query({ sort: 'email', order: 'desc' }))
-      assert.equal(byEmail.contacts[0]?.email, 'zoe@example.test')
-
-      const byCampaign = await book.list(userId, query({ sort: 'campaign' }))
-      assert.equal(byCampaign.contacts[0]?.campaign_name, 'Brouillon')
+      const { contacts } = await book.list(userId, query({ search: 'ana@' }))
+      const [ana] = contacts
+      assert.ok(ana)
+      assert.equal(ana.contact_name, 'Ana', 'a known name is not overwritten')
+      assert.equal(ana.company_name, 'Acme', 'an empty company is filled')
     })
 
-    it('searches an address, a name, a company or a campaign name', async () => {
+    it('sorts, searches, filters on origin, pages, and leaves out what a campaign holds', async () => {
+      const byCompany = await book.list(userId, query({ sort: 'company', order: 'desc' }))
+      assert.equal(byCompany.contacts[0]?.email, 'bob@example.test')
+
       assert.equal((await book.list(userId, query({ search: 'GLOB' }))).total, 1)
-      assert.equal((await book.list(userId, query({ search: 'lancée' }))).total, 2)
-      // A LIKE wildcard in the search is the character, not a pattern.
       assert.equal((await book.list(userId, query({ search: '%' }))).total, 0)
-    })
-
-    it('filters on status, source and campaign, and pages', async () => {
-      assert.equal((await book.list(userId, query({ status: 'sent' }))).total, 1)
       assert.equal((await book.list(userId, query({ source: 'mailfind' }))).total, 1)
-      assert.equal((await book.list(userId, query({ campaignId: launchedId }))).total, 2)
 
-      const second = await book.list(userId, query({ limit: 3, offset: 3 }))
-      assert.equal(second.total, 4)
+      const second = await book.list(userId, query({ limit: 2, offset: 2 }))
+      assert.equal(second.total, 3)
       assert.equal(second.contacts.length, 1)
+
+      // The running campaign holds Zoé and Ana: only Bob is left to offer it.
+      const offered = await book.list(userId, query({ excludeCampaignId: runningId }))
+      assert.deepEqual(
+        offered.contacts.map((row) => row.email),
+        ['bob@example.test'],
+      )
     })
 
-    it('adds a contact to a draft, marked as typed by hand, and counts it', async () => {
-      const outcome = await book.add(userId, draftId, details('new@example.test'))
+    it('adds a contact by hand, once per address and per account', async () => {
+      const added = await book.add(
+        userId,
+        details('new@example.test', { contact_name: 'Nouveau' }),
+      )
+      assert.equal(added.kind, 'saved')
+      assert.equal(added.contact.source, 'manual')
 
-      assert.equal(outcome.kind, 'saved')
-      assert.equal(outcome.contact.source, 'manual')
+      assert.equal(
+        (await book.add(userId, details('NEW@example.test'))).kind,
+        'duplicate',
+      )
+    })
+
+    it('updates the sends to come, and never a message already sent', async () => {
+      const zoe = await entryId('zoe@example.test')
+      const edited = await book.update(
+        userId,
+        zoe,
+        details('zoe.martin@example.test', {
+          contact_name: 'Zoé Martin',
+          company_name: 'Acme',
+        }),
+      )
+      assert.equal(edited.kind, 'saved')
+
+      // Pending in both campaigns: both take the new details.
+      for (const campaign of [draftId, runningId]) {
+        const row = (await recipients(campaign)).find((r) => r.book_id === zoe)
+        assert.equal(row?.email, 'zoe.martin@example.test')
+        assert.equal(row.contact_name, 'Zoé Martin')
+      }
+
+      // Ana was sent to: the running campaign keeps what went out.
+      const ana = await entryId('ana@example.test')
+      await book.update(
+        userId,
+        ana,
+        details('ana@example.test', { contact_name: 'Ana Lopez' }),
+      )
+      const sent = (await recipients(runningId)).find((r) => r.book_id === ana)
+      assert.equal(sent?.contact_name, 'Ana', 'history is not rewritten')
+      const pending = (await recipients(draftId)).find((r) => r.book_id === ana)
+      assert.equal(pending?.contact_name, 'Ana Lopez', 'the draft takes the new name')
+    })
+
+    it('refuses an address another entry has', async () => {
+      const bob = await entryId('bob@example.test')
+      assert.equal(
+        (await book.update(userId, bob, details('ANA@example.test'))).kind,
+        'duplicate',
+      )
+    })
+
+    it('removes a contact from the sends to come and keeps what was sent', async () => {
+      const ana = await entryId('ana@example.test')
+      await pool.query(
+        `INSERT INTO logs (campaign_id, contact_id, event_type)
+       SELECT campaign_id, id, 'sent' FROM contacts WHERE book_id = $1 AND status = 'sent'`,
+        [ana],
+      )
+
+      assert.equal(await book.remove(userId, ana), true)
+
+      // Gone from the draft, where nothing was sent; still in the running
+      // campaign, with its log, unlinked.
+      assert.ok(
+        (await recipients(draftId)).every((row) => row.email !== 'ana@example.test'),
+      )
+      const kept = (await recipients(runningId)).find(
+        (row) => row.email === 'ana@example.test',
+      )
+      assert.equal(kept?.status, 'sent')
+      assert.equal(kept.book_id, null)
 
       const { rows } = await pool.query<{ total_contacts: number }>(
         'SELECT total_contacts FROM campaigns WHERE id = $1',
         [draftId],
       )
-      assert.equal(rows[0]?.total_contacts, 3)
-    })
+      assert.equal(rows[0]?.total_contacts, (await recipients(draftId)).length)
 
-    it('refuses a launched campaign, a duplicate, and another account’s campaign', async () => {
-      assert.equal(
-        (await book.add(userId, launchedId, details('late@example.test'))).kind,
-        'not_editable',
-      )
-      assert.equal(
-        (await book.add(userId, draftId, details('ZOE@example.test'))).kind,
-        'duplicate',
-      )
-      assert.equal(
-        (await book.add(userId, theirsId, details('x@example.test'))).kind,
-        'not_found',
-      )
-    })
-
-    it('edits a contact of a draft, and not one of a launched campaign', async () => {
-      const { contacts } = await book.list(userId, query({ search: 'bob@' }))
-      const bob = contacts[0]
-      assert.ok(bob)
-
-      const edited = await book.update(
-        userId,
-        bob.id,
-        details('robert@example.test', {
-          contact_name: 'Robert',
-          company_name: 'Globex',
-        }),
-      )
-      assert.equal(edited.kind, 'saved')
-      assert.equal(edited.contact.email, 'robert@example.test')
-
-      const { contacts: launched } = await book.list(userId, query({ search: 'nemo@' }))
-      assert.ok(launched[0])
-      assert.equal(
-        (await book.update(userId, launched[0].id, details('nemo2@example.test'))).kind,
-        'not_editable',
-      )
-      assert.equal(
-        (await book.update(userId, NOBODY, details('a@example.test'))).kind,
-        'not_found',
-      )
-    })
-
-    it('removes a contact whatever its campaign’s state, never another account’s', async () => {
-      const { contacts } = await book.list(userId, query({ search: 'ana@' }))
-      assert.ok(contacts[0])
-
+      // Another account's entry is not found.
       const { rows: theirs } = await pool.query<{ id: string }>(
-        'SELECT id FROM contacts WHERE campaign_id = $1',
-        [theirsId],
+        "SELECT id FROM address_book WHERE email = 'them@example.test'",
       )
-      assert.ok(theirs[0])
-
-      assert.equal(await book.remove(userId, theirs[0].id), false)
-      assert.equal(await book.remove(userId, contacts[0].id), true)
-
-      const { rows } = await pool.query<{ total_contacts: number }>(
-        'SELECT total_contacts FROM campaigns WHERE id = $1',
-        [launchedId],
-      )
-      assert.equal(rows[0]?.total_contacts, 1)
+      assert.equal(await book.remove(userId, theirs[0]?.id ?? ana), false)
     })
 
-    it('copies picked contacts into a draft, once per address, never another account’s', async () => {
+    it('copies entries into a draft, once per address, never another account’s', async () => {
       const { rows: created } = await pool.query<{ id: string }>(
         "INSERT INTO campaigns (user_id, name) VALUES ($1, 'Cible') RETURNING id",
         [userId],
       )
-      const targetId = created[0]?.id ?? NOBODY
-
-      const pick = async (search: string) =>
-        (await book.list(userId, query({ search }))).contacts.map((row) => row.id)
+      const targetId = created[0]?.id ?? ''
       const { rows: theirs } = await pool.query<{ id: string }>(
-        'SELECT id FROM contacts WHERE campaign_id = $1',
-        [theirsId],
+        "SELECT id FROM address_book WHERE email = 'them@example.test'",
       )
-
-      const ids = [
-        ...(await pick('zoe@')),
-        ...(await pick('nemo@')),
-        ...theirs.map((row) => row.id),
-      ]
+      const ids = [await entryId('bob@example.test'), ...theirs.map((row) => row.id)]
 
       assert.deepEqual(await book.copyToCampaign(userId, targetId, ids), {
         kind: 'copied',
-        imported: 2,
+        imported: 1,
       })
-      // Picked again: the campaign already holds both.
       assert.deepEqual(await book.copyToCampaign(userId, targetId, ids), {
         kind: 'copied',
         imported: 0,
       })
       assert.equal(
-        (await book.copyToCampaign(userId, launchedId, ids)).kind,
+        (await book.copyToCampaign(userId, runningId, ids)).kind,
         'not_editable',
       )
       assert.equal((await book.copyToCampaign(userId, theirsId, ids)).kind, 'not_found')
 
-      // Zoé now sits in two campaigns: one person to pick, and none left to
-      // add to the campaign that already has her.
-      assert.equal((await book.list(userId, query({ search: 'zoe@' }))).total, 2)
-      assert.equal(
-        (await book.list(userId, query({ search: 'zoe@', unique: true }))).total,
-        1,
-      )
-      assert.equal(
-        (
-          await book.list(
-            userId,
-            query({ search: 'zoe@', unique: true, excludeCampaignId: targetId }),
-          )
-        ).total,
-        0,
-      )
+      const copied = await recipients(targetId)
+      assert.equal(copied[0]?.book_id, ids[0])
     })
   },
 )

@@ -58,6 +58,7 @@ const SAMPLE_EXPORT: UserExport = {
       logs: [],
     },
   ],
+  addressBook: [],
 }
 
 let baseUrl: string

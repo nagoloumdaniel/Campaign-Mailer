@@ -21,6 +21,15 @@ export interface UserExport {
     createdAt: string
   }
   campaigns: ExportedCampaign[]
+  /** The address book: one entry per address, as the Contacts page shows it. */
+  addressBook: {
+    email: string
+    contactName: string | null
+    companyName: string | null
+    salutation: string | null
+    source: string
+    createdAt: string
+  }[]
 }
 
 export interface ExportedCampaign {
@@ -170,6 +179,19 @@ export async function buildUserExport(
     logsByCampaign.set(row.campaign_id, list)
   }
 
+  const book = await pool.query<{
+    email: string
+    contact_name: string | null
+    company_name: string | null
+    salutation: string | null
+    source: string
+    created_at: Date
+  }>(
+    `SELECT email, contact_name, company_name, salutation, source, created_at
+     FROM address_book WHERE user_id = $1 ORDER BY created_at, id`,
+    [userId],
+  )
+
   return {
     exportedAt: new Date().toISOString(),
     account: {
@@ -195,6 +217,14 @@ export async function buildUserExport(
       completedAt: iso(row.completed_at),
       contacts: contactsByCampaign.get(row.id) ?? [],
       logs: logsByCampaign.get(row.id) ?? [],
+    })),
+    addressBook: book.rows.map((row) => ({
+      email: row.email,
+      contactName: row.contact_name,
+      companyName: row.company_name,
+      salutation: row.salutation,
+      source: row.source,
+      createdAt: row.created_at.toISOString(),
     })),
   }
 }

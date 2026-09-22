@@ -1,70 +1,57 @@
-import type { Pool } from 'pg'
-
-import type { CampaignType } from '../schemas/campaign.js'
+import type { Pool, PoolClient } from 'pg'
 
 import type { CampaignStatus } from './campaignState.js'
-import type { ContactStatus } from './contacts.js'
-import { campaignTypeLabel, formatInZone } from './history.js'
+import { formatInZone } from './history.js'
 import { csvCell } from './logExport.js'
 
 /**
- * Every contact of an account, across its campaigns: the address book.
+ * The account's address book: one entry per email address.
  *
- * Contacts belong to a campaign, and that stays true here. The address book is
- * a view over all of them with the campaign attached, not a second store of
- * people: a contact typed here goes into a campaign like any other, and one
- * removed here is removed from its campaign.
+ * Owner's design of 22 September 2026. A person is added once, whatever brings
+ * them (a CSV file, a manual add, MailFind later), and edited in one place. A
+ * campaign's recipients (`contacts`) are a snapshot taken from the book, linked
+ * by `book_id`; the trigger in the address-book migration creates the entry
+ * when an unknown address is imported and fills only its empty fields when the
+ * address is known, so a correction made here is never overwritten by an old
+ * file.
  *
- * Writing follows the campaign's rules rather than inventing its own. A contact
- * is added or edited only while its campaign is a draft, because once a
- * campaign is launched its list is what the send engine plans from, and an
- * address edited under a queued job would send to someone the user never
- * launched to. Removing is always allowed: a person asking to be forgotten is
- * forgotten whatever the campaign's state, and the send log keeps its line with
- * the contact detached, as account deletion already does.
+ * Editing an entry rewrites the recipients that have not been sent to yet, in
+ * any campaign, so the next message uses the new name; a recipient already sent
+ * to, or failed, keeps what went out, and the history with it. Removing an
+ * entry takes it out of the sends still to come and leaves the history whole:
+ * a recipient with a send log is never deleted (deleting one would cascade to
+ * its log rows).
  *
- * Every query joins the campaign and filters on its owner in the SQL itself, so
- * another account's contact is not found rather than forbidden.
+ * Every statement filters on the owner in the SQL, so another account's entry
+ * is not found rather than forbidden.
  */
 
 export type ContactSource = 'csv' | 'manual' | 'mailfind'
 
 export const ADDRESS_BOOK_SORTS = [
-  'company',
   'name',
   'email',
-  'campaign',
-  'status',
+  'company',
   'created',
+  'source',
 ] as const
 
 export type AddressBookSort = (typeof ADDRESS_BOOK_SORTS)[number]
 
 export interface AddressBookRow {
   id: string
-  campaign_id: string
-  campaign_name: string
-  campaign_status: CampaignStatus
-  campaign_type: CampaignType
   email: string
   contact_name: string | null
   company_name: string | null
   salutation: string | null
-  status: ContactStatus
   source: ContactSource
-  error_message: string | null
   created_at: Date
-  sent_at: Date | null
 }
 
 export interface AddressBookQuery {
-  /** Matches an address, a name, a company or a campaign. */
+  /** Matches an address, a name or a company. */
   search?: string | undefined
-  status?: ContactStatus | undefined
   source?: ContactSource | undefined
-  campaignId?: string | undefined
-  /** One row per address, its most recent contact, rather than one per campaign. */
-  unique?: boolean | undefined
   /** Leaves out the addresses this campaign already holds: what a picker needs. */
   excludeCampaignId?: string | undefined
   sort: AddressBookSort
@@ -83,85 +70,63 @@ export interface ContactDetails {
 export type WriteOutcome =
   | { kind: 'saved'; contact: AddressBookRow }
   | { kind: 'not_found' }
-  /** The campaign has been launched: its list is the send engine's now. */
-  | { kind: 'not_editable' }
+  /** Another entry of the account already has this address. */
   | { kind: 'duplicate' }
+
+export type CopyOutcome =
+  { kind: 'copied'; imported: number } | { kind: 'not_found' } | { kind: 'not_editable' }
 
 export interface AddressBookRepository {
   list(
     userId: string,
     query: AddressBookQuery,
   ): Promise<{ contacts: AddressBookRow[]; total: number }>
-  /** Every contact the filters match, in their order, for the export. */
+  /** Every entry the filters match, in their order, for the export. */
   all(
     userId: string,
     query: Omit<AddressBookQuery, 'limit' | 'offset'>,
   ): Promise<AddressBookRow[]>
-  add(userId: string, campaignId: string, details: ContactDetails): Promise<WriteOutcome>
-  update(
-    userId: string,
-    contactId: string,
-    details: ContactDetails,
-  ): Promise<WriteOutcome>
-  remove(userId: string, contactId: string): Promise<boolean>
-  /** Copies contacts of the account into one of its drafts. */
+  add(userId: string, details: ContactDetails): Promise<WriteOutcome>
+  update(userId: string, id: string, details: ContactDetails): Promise<WriteOutcome>
+  remove(userId: string, id: string): Promise<boolean>
+  /** Copies entries into one of the account's drafts, as recipients. */
   copyToCampaign(
     userId: string,
     campaignId: string,
-    contactIds: readonly string[],
+    ids: readonly string[],
   ): Promise<CopyOutcome>
 }
 
-export type CopyOutcome =
-  { kind: 'copied'; imported: number } | { kind: 'not_found' } | { kind: 'not_editable' }
-
-const SELECT = `
-  SELECT ct.id, ct.campaign_id, c.name AS campaign_name, c.status AS campaign_status,
-         c.type AS campaign_type, ct.email, ct.contact_name, ct.company_name,
-         ct.salutation, ct.status, ct.source, ct.error_message, ct.created_at, ct.sent_at
-  FROM contacts ct
-  JOIN campaigns c ON c.id = ct.campaign_id
-`
+const COLUMNS = `id, email, contact_name, company_name, salutation, source, created_at`
 
 /**
- * The ORDER BY for each sort, chosen from a fixed map: the column name never
- * comes from the request. Text is compared case-insensitively, an empty company
- * or name goes last whichever the direction, and the id breaks every tie so a
- * page boundary never shows a row twice or skips one.
+ * The ORDER BY for each sort, from a fixed map: the column name never comes
+ * from the request. Text compares without case, an empty name or company goes
+ * last whichever the direction, and the id breaks every tie so a page boundary
+ * never shows a row twice or skips one.
  */
 function orderBy(sort: AddressBookSort, order: 'asc' | 'desc'): string {
   const dir = order === 'desc' ? 'DESC' : 'ASC'
 
   const keys = new Map<AddressBookSort, string>([
+    ['name', `lower(contact_name) ${dir} NULLS LAST, lower(email) ASC`],
+    ['email', `lower(email) ${dir}`],
     [
       'company',
-      `lower(ct.company_name) ${dir} NULLS LAST, lower(ct.contact_name) ASC NULLS LAST, lower(ct.email) ASC`,
+      `lower(company_name) ${dir} NULLS LAST, lower(contact_name) ASC NULLS LAST, lower(email) ASC`,
     ],
-    ['name', `lower(ct.contact_name) ${dir} NULLS LAST, lower(ct.email) ASC`],
-    ['email', `lower(ct.email) ${dir}`],
-    ['campaign', `lower(c.name) ${dir}, lower(ct.email) ASC`],
-    ['status', `ct.status ${dir}, lower(ct.email) ASC`],
-    ['created', `ct.created_at ${dir}`],
+    ['created', `created_at ${dir}`],
+    ['source', `source ${dir}, lower(email) ASC`],
   ])
 
-  return `${keys.get(sort) ?? `lower(ct.email) ${dir}`}, ct.id ${dir}`
+  return `${keys.get(sort) ?? `lower(email) ${dir}`}, id ${dir}`
 }
 
-/**
- * The most rows one export carries: the same bound as the history's. An
- * account past it filters before exporting, which it would want to anyway.
- */
+/** The most rows one export carries: the same bound as the history's. */
 const EXPORT_LIMIT = 50_000
 
 /** Written by code point: the character itself is invisible in source and fails the linter. */
 const BYTE_ORDER_MARK = String.fromCharCode(0xfeff)
-
-const CONTACT_STATUS_LABELS = new Map<ContactStatus, string>([
-  ['pending', 'en attente'],
-  ['sent', 'envoyé'],
-  ['failed', 'en erreur'],
-  ['ignored', 'ignoré'],
-])
 
 const SOURCE_LABELS = new Map<ContactSource, string>([
   ['csv', 'import CSV'],
@@ -169,17 +134,8 @@ const SOURCE_LABELS = new Map<ContactSource, string>([
   ['mailfind', 'MailFind'],
 ])
 
-const CAMPAIGN_STATUS_LABELS = new Map<CampaignStatus, string>([
-  ['draft', 'brouillon'],
-  ['scheduled', 'programmée'],
-  ['running', 'en cours'],
-  ['paused', 'en pause'],
-  ['completed', 'terminée'],
-])
-
 /**
- * The address book as a CSV: every characteristic of each contact, and of its
- * campaign.
+ * The address book as a CSV: the columns of the page, nothing else.
  *
  * Every cell goes through `csvCell`, which neutralises the leading `=` a
  * spreadsheet would run as a formula: the addresses came from files the user
@@ -189,37 +145,18 @@ export function addressBookToCsv(
   rows: readonly AddressBookRow[],
   timezone: string,
 ): string {
-  const header = [
-    'adresse',
-    'contact',
-    'entreprise',
-    'civilite',
-    'statut',
-    'origine',
-    'campagne',
-    'type_campagne',
-    'statut_campagne',
-    'ajoute_le',
-    'envoye_le',
-    'erreur',
-  ]
+  const header = ['nom', 'email', 'entreprise', 'civilite', 'ajoute_le', 'origine']
     .map(csvCell)
     .join(',')
 
   const lines = rows.map((row) =>
     [
-      row.email,
       row.contact_name ?? '',
+      row.email,
       row.company_name ?? '',
       row.salutation ?? '',
-      CONTACT_STATUS_LABELS.get(row.status) ?? row.status,
-      SOURCE_LABELS.get(row.source) ?? row.source,
-      row.campaign_name,
-      campaignTypeLabel(row.campaign_type),
-      CAMPAIGN_STATUS_LABELS.get(row.campaign_status) ?? row.campaign_status,
       formatInZone(row.created_at, timezone),
-      row.sent_at ? formatInZone(row.sent_at, timezone) : '',
-      row.error_message ?? '',
+      SOURCE_LABELS.get(row.source) ?? row.source,
     ]
       .map(csvCell)
       .join(','),
@@ -228,103 +165,80 @@ export function addressBookToCsv(
   return `${BYTE_ORDER_MARK}${[header, ...lines].join('\r\n')}\r\n`
 }
 
-/** The unique index on (campaign_id, lower(email)) refused the write. */
+/** The unique index on (user_id, lower(email)) refused the write. */
 function isDuplicate(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === '23505'
 }
 
-export function createAddressBookRepository(pool: Pool): AddressBookRepository {
-  async function findOwned(userId: string, contactId: string) {
-    const { rows } = await pool.query<AddressBookRow>(
-      `${SELECT} WHERE ct.id = $1 AND c.user_id = $2`,
-      [contactId, userId],
-    )
-    return rows[0] ?? null
+/** Recomputes a campaign's counter from its rows, as the contact repository does. */
+async function syncTotals(client: Pool | PoolClient, campaignIds: readonly string[]) {
+  if (campaignIds.length === 0) {
+    return
   }
 
-  async function syncTotal(campaignId: string) {
-    await pool.query(
-      `UPDATE campaigns
-       SET total_contacts = (SELECT count(*) FROM contacts WHERE campaign_id = $1)
-       WHERE id = $1`,
-      [campaignId],
-    )
+  await client.query(
+    `UPDATE campaigns c
+     SET total_contacts = (SELECT count(*) FROM contacts WHERE campaign_id = c.id)
+     WHERE c.id = ANY($1::uuid[])`,
+    [campaignIds],
+  )
+}
+
+export function createAddressBookRepository(pool: Pool): AddressBookRepository {
+  async function list(userId: string, query: AddressBookQuery) {
+    const filters = ['user_id = $1']
+    const values: unknown[] = [userId]
+
+    const bind = (value: unknown) => {
+      values.push(value)
+      return `$${String(values.length)}`
+    }
+
+    if (query.source) {
+      filters.push(`source = ${bind(query.source)}`)
+    }
+
+    if (query.excludeCampaignId) {
+      filters.push(
+        `NOT EXISTS (SELECT 1 FROM contacts x
+                     WHERE x.campaign_id = ${bind(query.excludeCampaignId)}
+                       AND lower(x.email) = lower(address_book.email))`,
+      )
+    }
+
+    if (query.search) {
+      // LIKE's own wildcards are escaped: a search for "50%" means the text.
+      const pattern = bind(`%${query.search.toLowerCase().replace(/[\\%_]/g, '\\$&')}%`)
+      filters.push(
+        `(lower(email) LIKE ${pattern}
+          OR lower(coalesce(contact_name, '')) LIKE ${pattern}
+          OR lower(coalesce(company_name, '')) LIKE ${pattern})`,
+      )
+    }
+
+    const where = filters.join(' AND ')
+
+    const [counted, page] = await Promise.all([
+      pool.query<{ total: string }>(
+        `SELECT count(*)::text AS total FROM address_book WHERE ${where}`,
+        values,
+      ),
+      pool.query<AddressBookRow>(
+        `SELECT ${COLUMNS} FROM address_book WHERE ${where}
+         ORDER BY ${orderBy(query.sort, query.order)}
+         LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}`,
+        [...values, query.limit, query.offset],
+      ),
+    ])
+
+    return { contacts: page.rows, total: Number(counted.rows[0]?.total ?? 0) }
   }
 
   return {
-    async list(userId, query) {
-      const filters = ['c.user_id = $1']
-      const values: unknown[] = [userId]
-
-      const bind = (value: unknown) => {
-        values.push(value)
-        return `$${String(values.length)}`
-      }
-
-      if (query.status) {
-        filters.push(`ct.status = ${bind(query.status)}`)
-      }
-
-      if (query.source) {
-        filters.push(`ct.source = ${bind(query.source)}`)
-      }
-
-      if (query.campaignId) {
-        filters.push(`ct.campaign_id = ${bind(query.campaignId)}`)
-      }
-
-      if (query.unique) {
-        // The most recent contact of each address, among the account's own:
-        // the same person in three campaigns is one person to pick.
-        filters.push(
-          `ct.id = (SELECT ct2.id FROM contacts ct2
-                    JOIN campaigns c2 ON c2.id = ct2.campaign_id
-                    WHERE c2.user_id = $1 AND lower(ct2.email) = lower(ct.email)
-                    ORDER BY ct2.created_at DESC, ct2.id DESC LIMIT 1)`,
-        )
-      }
-
-      if (query.excludeCampaignId) {
-        filters.push(
-          `NOT EXISTS (SELECT 1 FROM contacts x
-                       WHERE x.campaign_id = ${bind(query.excludeCampaignId)}
-                         AND lower(x.email) = lower(ct.email))`,
-        )
-      }
-
-      if (query.search) {
-        // LIKE's own wildcards are escaped: a search for "50%" means the text.
-        const pattern = bind(`%${query.search.toLowerCase().replace(/[\\%_]/g, '\\$&')}%`)
-        filters.push(
-          `(lower(ct.email) LIKE ${pattern}
-            OR lower(coalesce(ct.contact_name, '')) LIKE ${pattern}
-            OR lower(coalesce(ct.company_name, '')) LIKE ${pattern}
-            OR lower(c.name) LIKE ${pattern})`,
-        )
-      }
-
-      const where = filters.join(' AND ')
-
-      const [counted, page] = await Promise.all([
-        pool.query<{ total: string }>(
-          `SELECT count(*)::text AS total
-           FROM contacts ct JOIN campaigns c ON c.id = ct.campaign_id
-           WHERE ${where}`,
-          values,
-        ),
-        pool.query<AddressBookRow>(
-          `${SELECT} WHERE ${where}
-           ORDER BY ${orderBy(query.sort, query.order)}
-           LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}`,
-          [...values, query.limit, query.offset],
-        ),
-      ])
-
-      return { contacts: page.rows, total: Number(counted.rows[0]?.total ?? 0) }
-    },
+    list,
 
     async all(userId, query) {
-      const { contacts } = await this.list(userId, {
+      const { contacts } = await list(userId, {
         ...query,
         limit: EXPORT_LIMIT,
         offset: 0,
@@ -332,27 +246,13 @@ export function createAddressBookRepository(pool: Pool): AddressBookRepository {
       return contacts
     },
 
-    async add(userId, campaignId, details) {
-      const { rows: owned } = await pool.query<{ status: CampaignStatus }>(
-        'SELECT status FROM campaigns WHERE id = $1 AND user_id = $2',
-        [campaignId, userId],
-      )
-      const campaign = owned[0]
-
-      if (!campaign) {
-        return { kind: 'not_found' }
-      }
-
+    async add(userId, details) {
       try {
-        // The draft check is in the INSERT itself, so a launch landing between
-        // the read above and this line wins.
-        const { rows } = await pool.query<{ id: string }>(
-          `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation, source)
-           SELECT c.id, $3, $4, $5, $6, 'manual'
-           FROM campaigns c WHERE c.id = $1 AND c.user_id = $2 AND c.status = 'draft'
-           RETURNING id`,
+        const { rows } = await pool.query<AddressBookRow>(
+          `INSERT INTO address_book (user_id, email, contact_name, company_name, salutation, source)
+           VALUES ($1, $2, $3, $4, $5, 'manual')
+           RETURNING ${COLUMNS}`,
           [
-            campaignId,
             userId,
             details.email,
             details.contact_name,
@@ -361,13 +261,7 @@ export function createAddressBookRepository(pool: Pool): AddressBookRepository {
           ],
         )
 
-        const id = rows[0]?.id
-        if (!id) {
-          return { kind: 'not_editable' }
-        }
-
-        await syncTotal(campaignId)
-        const contact = await findOwned(userId, id)
+        const contact = rows[0]
         return contact ? { kind: 'saved', contact } : { kind: 'not_found' }
       } catch (err) {
         if (isDuplicate(err)) {
@@ -377,17 +271,20 @@ export function createAddressBookRepository(pool: Pool): AddressBookRepository {
       }
     },
 
-    async update(userId, contactId, details) {
+    async update(userId, id, details) {
+      const client = await pool.connect()
+
       try {
-        const { rows } = await pool.query<{ id: string }>(
-          `UPDATE contacts ct
-           SET email = $3, contact_name = $4, company_name = $5, salutation = $6
-           FROM campaigns c
-           WHERE ct.id = $1 AND c.id = ct.campaign_id AND c.user_id = $2
-             AND c.status = 'draft'
-           RETURNING ct.id`,
+        await client.query('BEGIN')
+
+        const { rows } = await client.query<AddressBookRow>(
+          `UPDATE address_book
+           SET email = $3, contact_name = $4, company_name = $5, salutation = $6,
+               updated_at = now()
+           WHERE id = $1 AND user_id = $2
+           RETURNING ${COLUMNS}`,
           [
-            contactId,
+            id,
             userId,
             details.email,
             details.contact_name,
@@ -396,40 +293,90 @@ export function createAddressBookRepository(pool: Pool): AddressBookRepository {
           ],
         )
 
-        const contact = await findOwned(userId, contactId)
+        const contact = rows[0]
 
         if (!contact) {
+          await client.query('ROLLBACK')
           return { kind: 'not_found' }
         }
 
-        return rows[0] ? { kind: 'saved', contact } : { kind: 'not_editable' }
+        // The campaigns to come take the new details: every recipient of this
+        // person not sent to yet. One already sent to, or failed, keeps what
+        // went out. A campaign that already holds the new address under
+        // another recipient is left alone rather than given a duplicate.
+        await client.query(
+          `UPDATE contacts ct
+           SET email = $2, contact_name = $3, company_name = $4, salutation = $5
+           WHERE ct.book_id = $1
+             AND ct.status IN ('pending', 'ignored')
+             AND NOT EXISTS (
+               SELECT 1 FROM contacts other
+               WHERE other.campaign_id = ct.campaign_id
+                 AND other.id <> ct.id
+                 AND lower(other.email) = lower($2)
+             )`,
+          [
+            id,
+            details.email,
+            details.contact_name,
+            details.company_name,
+            details.salutation,
+          ],
+        )
+
+        await client.query('COMMIT')
+        return { kind: 'saved', contact }
       } catch (err) {
+        await client.query('ROLLBACK')
         if (isDuplicate(err)) {
           return { kind: 'duplicate' }
         }
         throw err
+      } finally {
+        client.release()
       }
     },
 
-    async remove(userId, contactId) {
-      const { rows } = await pool.query<{ campaign_id: string }>(
-        `DELETE FROM contacts ct
-         USING campaigns c
-         WHERE ct.id = $1 AND c.id = ct.campaign_id AND c.user_id = $2
-         RETURNING ct.campaign_id`,
-        [contactId, userId],
-      )
+    async remove(userId, id) {
+      const client = await pool.connect()
 
-      const campaignId = rows[0]?.campaign_id
-      if (!campaignId) {
-        return false
+      try {
+        await client.query('BEGIN')
+
+        const owned = await client.query(
+          'SELECT 1 FROM address_book WHERE id = $1 AND user_id = $2 FOR UPDATE',
+          [id, userId],
+        )
+
+        if (owned.rowCount === 0) {
+          await client.query('ROLLBACK')
+          return false
+        }
+
+        // Out of every send still to come. A recipient with anything in the
+        // log stays: deleting it would delete its history with it.
+        const { rows } = await client.query<{ campaign_id: string }>(
+          `DELETE FROM contacts ct
+           WHERE ct.book_id = $1
+             AND ct.status IN ('pending', 'ignored')
+             AND NOT EXISTS (SELECT 1 FROM logs l WHERE l.contact_id = ct.id)
+           RETURNING ct.campaign_id`,
+          [id],
+        )
+
+        await client.query('DELETE FROM address_book WHERE id = $1', [id])
+        await syncTotals(client, [...new Set(rows.map((row) => row.campaign_id))])
+        await client.query('COMMIT')
+        return true
+      } catch (err) {
+        await client.query('ROLLBACK')
+        throw err
+      } finally {
+        client.release()
       }
-
-      await syncTotal(campaignId)
-      return true
     },
 
-    async copyToCampaign(userId, campaignId, contactIds) {
+    async copyToCampaign(userId, campaignId, ids) {
       const { rows: owned } = await pool.query<{ status: CampaignStatus }>(
         'SELECT status FROM campaigns WHERE id = $1 AND user_id = $2',
         [campaignId, userId],
@@ -440,30 +387,26 @@ export function createAddressBookRepository(pool: Pool): AddressBookRepository {
         return { kind: 'not_found' }
       }
 
-      // The owner is checked in the SELECT: an id of another account's contact
-      // copies nothing. The draft check sits in the same statement, so a launch
-      // landing between the read above and this line wins. The same address
-      // picked twice is copied once, its most recent version; one the campaign
-      // already holds is skipped by the unique index.
+      // Owner checked in the SELECT: an id of another account's entry copies
+      // nothing. The draft check sits in the same statement, so a launch
+      // landing between the read above and this line wins; an address the
+      // campaign already holds is skipped by its unique index.
       const result = await pool.query(
-        `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation, source)
-         SELECT DISTINCT ON (lower(ct.email))
-                $1::uuid, ct.email, ct.contact_name, ct.company_name, ct.salutation, ct.source
-         FROM contacts ct
-         JOIN campaigns src ON src.id = ct.campaign_id
-         WHERE ct.id = ANY($2::uuid[]) AND src.user_id = $3
+        `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation, source, book_id)
+         SELECT $1::uuid, ab.email, ab.contact_name, ab.company_name, ab.salutation, ab.source, ab.id
+         FROM address_book ab
+         WHERE ab.id = ANY($2::uuid[]) AND ab.user_id = $3
            AND EXISTS (SELECT 1 FROM campaigns t
                        WHERE t.id = $1 AND t.user_id = $3 AND t.status = 'draft')
-         ORDER BY lower(ct.email), ct.created_at DESC
          ON CONFLICT DO NOTHING`,
-        [campaignId, contactIds, userId],
+        [campaignId, ids, userId],
       )
 
       if (campaign.status !== 'draft') {
         return { kind: 'not_editable' }
       }
 
-      await syncTotal(campaignId)
+      await syncTotals(pool, [campaignId])
       return { kind: 'copied', imported: result.rowCount ?? 0 }
     },
   }

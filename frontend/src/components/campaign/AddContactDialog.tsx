@@ -5,10 +5,12 @@ import { TextField } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
 import { Modal } from '@/components/ui/Modal'
 import { ApiError } from '@/services/api'
-import { contactsApi, type Contact, type MappedRow } from '@/services/contacts'
+import { contactsApi, type MappedRow } from '@/services/contacts'
 
 /**
- * Adding one contact by hand.
+ * Adding one contact by hand, or editing one: the same dialog in a campaign
+ * and on the Contacts page (owner's request, 22 September 2026: the same
+ * fields, nothing more, nothing less).
  *
  * The import exists for a list; this exists for the one address that arrives
  * after it — a name met at a forum, a second contact at a company already in
@@ -35,26 +37,65 @@ const EMPTY = {
 
 type Form = typeof EMPTY
 
+/** Where the contact goes: a campaign's recipients, or the account's contacts. */
+type Target = 'campaign' | 'book'
+
+const WORDING: Record<Target, { intro: string; added: string; duplicate: string }> = {
+  campaign: {
+    intro:
+      'Il s’ajoute à la suite des contacts existants. Seule l’adresse e-mail est obligatoire.',
+    added: 'rejoint les destinataires de cette campagne, en attente d’envoi.',
+    duplicate: 'Cette adresse est déjà dans la campagne.',
+  },
+  book: {
+    intro: 'Il rejoint vos contacts. Seule l’adresse e-mail est obligatoire.',
+    added: 'est enregistré dans vos contacts.',
+    duplicate: 'Cette adresse est déjà dans vos contacts.',
+  },
+}
+
+function formOf(initial: MappedRow | undefined): Form {
+  return initial
+    ? {
+        email: initial.email,
+        contact_name: initial.contact_name ?? '',
+        company_name: initial.company_name ?? '',
+        salutation: initial.salutation ?? '',
+      }
+    : EMPTY
+}
+
 export function AddContactDialog({
   open,
-  campaignId,
   onClose,
   onAdded,
+  campaignId,
+  save,
+  initial,
+  target = 'campaign',
 }: {
   open: boolean
-  campaignId: string
   onClose: () => void
-  /** The table and the campaign's count both move when a contact lands. */
+  /** The table and the counts move when a contact lands or changes. */
   onAdded: () => void
+  /** Adds to this campaign, unless `save` says otherwise. */
+  campaignId?: string | undefined
+  /** How the contact is saved, for a use other than a campaign's add. */
+  save?: ((row: MappedRow) => Promise<{ email: string }>) | undefined
+  /** The contact being edited; absent to add one. */
+  initial?: MappedRow | undefined
+  target?: Target
 }) {
   const formId = useId()
-  const [form, setForm] = useState<Form>(EMPTY)
+  const editing = initial !== undefined
+  const wording = WORDING[target]
+  const [form, setForm] = useState<Form>(() => formOf(initial))
   const [saving, setSaving] = useState(false)
   /** Shown under the address field, where the address is the problem. */
   const [emailError, setEmailError] = useState<string | null>(null)
   /** Shown above the fields, for a refusal that is not about one field. */
   const [failure, setFailure] = useState<string | null>(null)
-  const [added, setAdded] = useState<Contact | null>(null)
+  const [added, setAdded] = useState<{ email: string } | null>(null)
 
   function set(field: keyof Form, value: string) {
     setForm((current) => ({ ...current, [field]: value }))
@@ -64,7 +105,7 @@ export function AddContactDialog({
   }
 
   function clear() {
-    setForm(EMPTY)
+    setForm(formOf(initial))
     setEmailError(null)
     setFailure(null)
     setAdded(null)
@@ -96,13 +137,17 @@ export function AddContactDialog({
 
     for (const field of ['contact_name', 'company_name', 'salutation'] as const) {
       const value = form[field].trim()
-      if (value !== '') {
+      // Editing sends every field: an emptied one is a cleared one.
+      if (value !== '' || editing) {
         payload[field] = value
       }
     }
 
     try {
-      setAdded(await contactsApi.add(campaignId, payload))
+      const saved = save
+        ? await save(payload)
+        : await contactsApi.add(campaignId ?? '', payload)
+      setAdded(saved)
       onAdded()
     } catch (err) {
       apply(err)
@@ -114,7 +159,7 @@ export function AddContactDialog({
   /** Turns the refusal into the sentence that says what to do about it. */
   function apply(err: unknown) {
     if (!(err instanceof ApiError)) {
-      setFailure('Le contact n’a pas pu être ajouté. Réessayez.')
+      setFailure('Le contact n’a pas pu être enregistré. Réessayez.')
       return
     }
 
@@ -124,7 +169,7 @@ export function AddContactDialog({
     }
 
     if (err.code === 'duplicate_email') {
-      setEmailError('Cette adresse est déjà dans la campagne.')
+      setEmailError(wording.duplicate)
       return
     }
 
@@ -139,7 +184,9 @@ export function AddContactDialog({
     setFailure(
       err.status === 0
         ? 'Le serveur est injoignable. Vérifiez votre connexion, puis réessayez.'
-        : 'Le contact n’a pas pu être ajouté. Réessayez.',
+        : err.status === 404
+          ? 'Ce contact n’existe plus. Rechargez la page.'
+          : 'Le contact n’a pas pu être enregistré. Réessayez.',
     )
   }
 
@@ -150,18 +197,22 @@ export function AddContactDialog({
         onClose={dismiss}
         icon="check-circle"
         tone="success"
-        title="Contact ajouté"
+        title={editing ? 'Contact modifié' : 'Contact ajouté'}
         description={
           <>
-            <strong className="font-semibold text-ink">{added.email}</strong> rejoint les
-            destinataires de cette campagne, en attente d’envoi.
+            <strong className="font-semibold text-ink">{added.email}</strong>{' '}
+            {editing
+              ? 'est à jour. Les campagnes à venir utiliseront ces informations ; les messages déjà envoyés ne changent pas.'
+              : wording.added}
           </>
         }
         footer={
           <>
-            <Button variant="ghost" icon="plus" onClick={clear}>
-              Ajouter un autre contact
-            </Button>
+            {!editing && (
+              <Button variant="ghost" icon="plus" onClick={clear}>
+                Ajouter un autre contact
+              </Button>
+            )}
             <Button variant="primary" onClick={dismiss}>
               Terminé
             </Button>
@@ -175,9 +226,13 @@ export function AddContactDialog({
     <Modal
       open={open}
       onClose={dismiss}
-      icon="user"
-      title="Ajouter un contact"
-      description="Il s’ajoute à la suite des contacts existants. Seule l’adresse e-mail est obligatoire."
+      icon={editing ? 'edit' : 'user'}
+      title={editing ? 'Modifier le contact' : 'Ajouter un contact'}
+      description={
+        editing
+          ? 'Les campagnes à venir utiliseront ces informations ; les messages déjà envoyés ne changent pas.'
+          : wording.intro
+      }
       footer={
         <>
           <Button variant="ghost" onClick={dismiss} disabled={saving}>
@@ -185,12 +240,12 @@ export function AddContactDialog({
           </Button>
           <Button
             variant="primary"
-            icon="plus"
+            icon={editing ? 'check' : 'plus'}
             type="submit"
             form={formId}
             loading={saving}
           >
-            Ajouter le contact
+            {editing ? 'Enregistrer' : 'Ajouter le contact'}
           </Button>
         </>
       }

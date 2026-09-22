@@ -3,14 +3,12 @@ import { Router, type Response } from 'express'
 import { isUuid, requireAuth, signedInUserId } from '../middleware/auth.js'
 import { validateBody } from '../middleware/validate.js'
 import {
+  addressBookContactSchema,
   addressBookExportSchema,
   addressBookQuerySchema,
   copyToCampaignSchema,
+  type AddressBookContactInput,
   type CopyToCampaignInput,
-  createAddressBookContactSchema,
-  updateAddressBookContactSchema,
-  type CreateAddressBookContactInput,
-  type UpdateAddressBookContactInput,
 } from '../schemas/addressBook.js'
 import {
   addressBookToCsv,
@@ -22,11 +20,9 @@ import {
 import { normaliseEmail } from '../services/contactImport.js'
 
 /**
- * /api/contacts — the account's address book (services/addressBook.ts).
- *
- * The same contacts as under /api/campaigns/:id/contacts, seen across every
- * campaign at once, searchable and sortable, and editable under the same rule:
- * only while their campaign is a draft.
+ * /api/contacts — the account's address book (services/addressBook.ts): one
+ * entry per address, listed, searched, sorted, added, edited, removed,
+ * exported, and copied into a draft campaign.
  */
 export function createAddressBookRouter({
   addressBook,
@@ -46,14 +42,9 @@ export function createAddressBookRouter({
         return
       }
 
-      const {
-        campaign_id: campaignId,
-        exclude_campaign_id: excludeCampaignId,
-        ...rest
-      } = query.data
+      const { exclude_campaign_id: excludeCampaignId, ...rest } = query.data
       const { contacts, total } = await addressBook.list(signedInUserId(req), {
         ...rest,
-        campaignId,
         excludeCampaignId,
       })
 
@@ -66,11 +57,7 @@ export function createAddressBookRouter({
     })().catch(next)
   })
 
-  /**
-   * Every contact the current filters match, as a CSV, in the order the page
-   * shows them. The same filters as the list, so what is exported is what the
-   * user was looking at, all pages at once.
-   */
+  /** Every entry the current filters match, as a CSV, in the page's order. */
   router.get('/export', (req, res, next) => {
     void (async () => {
       const query = addressBookExportSchema.safeParse(req.query)
@@ -80,15 +67,9 @@ export function createAddressBookRouter({
         return
       }
 
-      const {
-        campaign_id: campaignId,
-        exclude_campaign_id: excludeCampaignId,
-        timezone,
-        ...rest
-      } = query.data
+      const { exclude_campaign_id: excludeCampaignId, timezone, ...rest } = query.data
       const rows = await addressBook.all(signedInUserId(req), {
         ...rest,
-        campaignId,
         excludeCampaignId,
       })
 
@@ -101,8 +82,8 @@ export function createAddressBookRouter({
   })
 
   /**
-   * Loads contacts the account already has into a draft: a user writing to
-   * the same companies again should not have to export and re-import them.
+   * Loads entries of the book into a draft: a user writing to the same
+   * companies again should not have to export and re-import them.
    */
   router.post('/copy', validateBody(copyToCampaignSchema), (req, res, next) => {
     void (async () => {
@@ -126,28 +107,22 @@ export function createAddressBookRouter({
     })().catch(next)
   })
 
-  router.post('/', validateBody(createAddressBookContactSchema), (req, res, next) => {
+  router.post('/', validateBody(addressBookContactSchema), (req, res, next) => {
     void (async () => {
-      const input = req.body as CreateAddressBookContactInput
-      const details = detailsOf(input)
+      const details = detailsOf(req.body as AddressBookContactInput)
 
       if (!details) {
         invalidEmail(res)
         return
       }
 
-      const outcome = await addressBook.add(
-        signedInUserId(req),
-        input.campaign_id,
-        details,
-      )
-      answer(res, outcome, 201, 'Campaign not found')
+      answer(res, await addressBook.add(signedInUserId(req), details), 201)
     })().catch(next)
   })
 
   router.patch(
     '/:contactId',
-    validateBody(updateAddressBookContactSchema),
+    validateBody(addressBookContactSchema),
     (req, res, next) => {
       void (async () => {
         const raw: unknown = req.params.contactId
@@ -157,19 +132,14 @@ export function createAddressBookRouter({
           return
         }
 
-        const details = detailsOf(req.body as UpdateAddressBookContactInput)
+        const details = detailsOf(req.body as AddressBookContactInput)
 
         if (!details) {
           invalidEmail(res)
           return
         }
 
-        answer(
-          res,
-          await addressBook.update(signedInUserId(req), raw, details),
-          200,
-          'Contact not found',
-        )
+        answer(res, await addressBook.update(signedInUserId(req), raw, details), 200)
       })().catch(next)
     },
   )
@@ -191,7 +161,7 @@ export function createAddressBookRouter({
 }
 
 /** The fields as stored: the address normalised, blanks as null. Null when the address is not one. */
-function detailsOf(input: UpdateAddressBookContactInput): ContactDetails | null {
+function detailsOf(input: AddressBookContactInput): ContactDetails | null {
   const email = normaliseEmail(input.email)
 
   return email
@@ -218,23 +188,17 @@ function invalidEmail(res: Response) {
 }
 
 /** Each refusal carries a code, so the client never matches on English prose. */
-function answer(res: Response, outcome: WriteOutcome, status: number, missing: string) {
+function answer(res: Response, outcome: WriteOutcome, status: number) {
   switch (outcome.kind) {
     case 'saved':
       res.status(status).json({ contact: toPublic(outcome.contact) })
       return
     case 'not_found':
-      res.status(404).json({ error: missing })
-      return
-    case 'not_editable':
-      res.status(409).json({
-        error: 'The campaign has been launched: its contacts can no longer be changed',
-        code: 'campaign_not_editable',
-      })
+      res.status(404).json({ error: 'Contact not found' })
       return
     case 'duplicate':
       res.status(409).json({
-        error: 'This address is already in the campaign',
+        error: 'This address is already in the address book',
         code: 'duplicate_email',
       })
       return
@@ -248,15 +212,7 @@ function toPublic(row: AddressBookRow) {
     contactName: row.contact_name,
     companyName: row.company_name,
     salutation: row.salutation,
-    status: row.status,
     source: row.source,
     createdAt: row.created_at.toISOString(),
-    sentAt: row.sent_at?.toISOString() ?? null,
-    campaign: {
-      id: row.campaign_id,
-      name: row.campaign_name,
-      status: row.campaign_status,
-      type: row.campaign_type,
-    },
   }
 }

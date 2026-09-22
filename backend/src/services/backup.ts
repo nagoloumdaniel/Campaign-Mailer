@@ -23,6 +23,10 @@ import type { Pool, PoolClient } from 'pg'
 /** Parents first: a restore inserts in this order, and empties in reverse. */
 export const BACKED_UP_TABLES = [
   'users',
+  // Before contacts, whose book_id points at it. A backup written before the
+  // address book existed has no such lines: the trigger rebuilds the entries
+  // as its contacts are restored.
+  'address_book',
   'campaigns',
   'campaign_attachments',
   'contacts',

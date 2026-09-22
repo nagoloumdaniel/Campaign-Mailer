@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { StatusBadge } from '@/components/campaign/CampaignBadges'
-import { ContactFormDialog } from '@/components/contacts/ContactFormDialog'
+import { AddContactDialog } from '@/components/campaign/AddContactDialog'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { HistorySkeleton } from '@/components/skeletons/PageSkeletons'
 import { Badge, type BadgeTone } from '@/components/ui/Badge'
@@ -30,68 +29,40 @@ import {
   CAMPAIGN_TYPES,
   campaignTypeLabel,
   campaignsApi,
-  type Campaign,
   type CampaignType,
 } from '@/services/campaigns'
-import { contactStatusLabel, type ContactStatus } from '@/services/contacts'
 import { countOf, formatDate } from '@/services/format'
 
 /**
- * Every contact of the account, whatever campaign it sits in and wherever it
- * came from: a CSV file, typed by hand, or sent by MailFind.
+ * The account's contacts: one line per email address, whatever brought it (a
+ * CSV file, a manual add, MailFind) and whether a campaign uses it or not.
  *
- * The campaign page answers "who does this campaign write to". This page
- * answers the question that comes later, once there are five campaigns: "do I
- * already have this company, and in which campaign". So it is one table over
- * all of them, sorted by company by default, searchable on every text column,
- * and every column that can sort does so from its header.
+ * Owner's design of 22 September 2026. The page shows the person and nothing
+ * about campaigns: name, address, company, salutation, the date it was added,
+ * where it came from. Every contact can be edited at any time; the campaigns
+ * still to send take the change, and what was already sent stays as it went
+ * out, in the history. Adding and editing use the very dialog a campaign uses,
+ * with the same four fields.
  *
- * The search has its row, the filters have theirs: four selects beside a
- * search field squeeze each other at every width short of a wide screen, and
- * on a phone they stack one per line instead.
- *
- * Selecting rows turns the page into the start of a campaign: the contacts
- * are copied server-side into a new draft, the same mechanism the history
- * uses for a follow-up. The selection survives paging, so a list can be built
- * from several pages of a search.
- *
- * Adding and editing follow the campaign's own rule: only while the campaign is
- * a draft. A launched campaign's list is what the send engine plans from, so
- * its rows show a read-only eye instead of a pencil, with the reason on hover.
- * Removing is always possible: someone who asks to be forgotten is forgotten,
- * and the history keeps the line of what was sent, without the contact.
+ * Selecting lines turns them into a new draft campaign, or removes them: a
+ * contact removed here leaves the sends still to come, and the history keeps
+ * what was already sent.
  */
 
 type SortKey = `${AddressBookSort}:${'asc' | 'desc'}`
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: 'company:asc', label: 'Entreprise, A à Z' },
-  { value: 'company:desc', label: 'Entreprise, Z à A' },
   { value: 'name:asc', label: 'Nom, A à Z' },
   { value: 'name:desc', label: 'Nom, Z à A' },
-  { value: 'email:asc', label: 'Adresse, A à Z' },
-  { value: 'campaign:asc', label: 'Campagne, A à Z' },
-  { value: 'status:asc', label: 'Statut' },
+  { value: 'email:asc', label: 'E-mail, A à Z' },
+  { value: 'company:asc', label: 'Entreprise, A à Z' },
+  { value: 'company:desc', label: 'Entreprise, Z à A' },
   { value: 'created:desc', label: 'Ajoutés récemment' },
   { value: 'created:asc', label: 'Ajoutés en premier' },
+  { value: 'source:asc', label: 'Origine' },
 ]
 
 const PAGE_SIZES = [25, 50, 100]
-
-const STATUS_OPTIONS: { value: ContactStatus | 'all'; label: string }[] = [
-  { value: 'all', label: 'Tous les statuts' },
-  ...(['pending', 'sent', 'failed', 'ignored'] as const).map((status) => ({
-    value: status,
-    label: contactStatusLabel(status),
-  })),
-]
-
-const STATUS_TONE: Record<ContactStatus, BadgeTone> = {
-  pending: 'neutral',
-  sent: 'success',
-  failed: 'danger',
-  ignored: 'warning',
-}
 
 const SOURCE_TONE: Record<ContactSource, BadgeTone> = {
   csv: 'neutral',
@@ -114,13 +85,10 @@ export function Contacts() {
   const [load, setLoad] = useState<Load>({ state: 'loading' })
   const [contacts, setContacts] = useState<BookContact[]>([])
   const [total, setTotal] = useState(0)
-  const [campaigns, setCampaigns] = useState<Campaign[]>([])
 
   const [search, setSearch] = useState('')
-  const [status, setStatus] = useState<ContactStatus | 'all'>('all')
   const [source, setSource] = useState<ContactSource | 'all'>('all')
-  const [campaignId, setCampaignId] = useState('all')
-  const [sort, setSort] = useState<SortKey>('company:asc')
+  const [sort, setSort] = useState<SortKey>('name:asc')
   const [limit, setLimit] = useState(PAGE_SIZES[0] ?? 25)
   const [offset, setOffset] = useState(0)
 
@@ -128,47 +96,31 @@ export function Contacts() {
   const [dialog, setDialog] = useState<Dialog>(null)
   const [deleting, setDeleting] = useState(false)
 
-  const query = useMemo(() => {
+  const filters = useMemo(() => {
     const [by, order] = sort.split(':') as [AddressBookSort, 'asc' | 'desc']
     return {
       sort: by,
       order,
-      limit,
-      offset,
       ...(search ? { search } : {}),
-      ...(status === 'all' ? {} : { status }),
       ...(source === 'all' ? {} : { source }),
-      ...(campaignId === 'all' ? {} : { campaignId }),
     }
-  }, [sort, limit, offset, search, status, source, campaignId])
+  }, [sort, search, source])
 
   const fetchPage = useCallback(async () => {
     try {
-      const page = await addressBookApi.list(query)
+      const page = await addressBookApi.list({ ...filters, limit, offset })
       setContacts(page.contacts)
       setTotal(page.total)
       setLoad({ state: 'ready' })
     } catch {
       setLoad({ state: 'failed' })
     }
-  }, [query])
+  }, [filters, limit, offset])
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
     void fetchPage()
   }, [fetchPage])
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    void campaignsApi
-      .list()
-      .then(setCampaigns)
-      .catch(() => {
-        setCampaigns([])
-      })
-  }, [])
-
-  const drafts = campaigns.filter((campaign) => campaign.status === 'draft')
 
   /** Every filter and every sort goes back to the first page (see History). */
   function refine(apply: () => void) {
@@ -179,9 +131,7 @@ export function Contacts() {
   function clearFilters() {
     refine(() => {
       setSearch('')
-      setStatus('all')
       setSource('all')
-      setCampaignId('all')
     })
   }
 
@@ -277,8 +227,8 @@ export function Contacts() {
     reloadAfterRemoving(removed)
   }
 
-  const filtering =
-    search !== '' || status !== 'all' || source !== 'all' || campaignId !== 'all'
+  const filtering = search !== '' || source !== 'all'
+  const editing = dialog?.kind === 'edit' ? dialog.contact : null
 
   if (load.state === 'loading' && contacts.length === 0) {
     return <HistorySkeleton />
@@ -288,20 +238,13 @@ export function Contacts() {
     <>
       <PageHeader
         title="Contacts"
-        description="Tous les contacts de vos campagnes, importés d’un fichier, ajoutés à la main ou reçus de MailFind."
+        description="Vos contacts, une ligne par adresse, qu’ils viennent d’un fichier, d’un ajout à la main ou de MailFind."
         action={
           <>
             {total > 0 && (
-              // Every contact the filters match, all pages, every column.
+              // Every contact the filters match, all pages, the page's columns.
               <AnchorButton
-                href={addressBookApi.exportUrl({
-                  sort: query.sort,
-                  order: query.order,
-                  ...(search ? { search } : {}),
-                  ...(status === 'all' ? {} : { status }),
-                  ...(source === 'all' ? {} : { source }),
-                  ...(campaignId === 'all' ? {} : { campaignId }),
-                })}
+                href={addressBookApi.exportUrl(filters)}
                 download
                 variant="secondary"
                 icon="download"
@@ -331,7 +274,7 @@ export function Contacts() {
         <EmptyState
           icon="users"
           title="Aucun contact pour le moment"
-          description="Ajoutez un contact ou importez un fichier CSV dans une campagne : chaque contact apparaîtra ici."
+          description="Ajoutez un contact, ou importez un fichier CSV dans une campagne : chaque adresse apparaîtra ici, une seule fois."
           action={
             <Button
               variant="primary"
@@ -354,16 +297,15 @@ export function Contacts() {
                 setSearch(value)
               })
             }}
-            placeholder="Rechercher une adresse, un nom, une entreprise ou une campagne…"
+            placeholder="Rechercher un nom, une adresse ou une entreprise…"
             label="Rechercher un contact"
           />
 
-          {/* The filters, on theirs: one per line on a phone, two on a tablet,
-              four side by side from a laptop up. */}
+          {/* The filters, on theirs: stacked on a phone, side by side above. */}
           <div
             role="group"
             aria-label="Filtres et tri"
-            className="mt-2 grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 lg:grid-cols-4"
+            className="mt-2 grid grid-cols-1 gap-2 min-[480px]:grid-cols-3"
           >
             <Select
               value={sort}
@@ -374,24 +316,6 @@ export function Contacts() {
                 })
               }}
               label="Trier"
-              labelHidden
-            />
-
-            <Select
-              value={campaignId}
-              options={[
-                { value: 'all', label: 'Toutes les campagnes' },
-                ...campaigns.map((campaign) => ({
-                  value: campaign.id,
-                  label: campaign.name,
-                })),
-              ]}
-              onChange={(value) => {
-                refine(() => {
-                  setCampaignId(value)
-                })
-              }}
-              label="Filtrer par campagne"
               labelHidden
             />
 
@@ -411,37 +335,6 @@ export function Contacts() {
             />
 
             <Select
-              value={status}
-              options={STATUS_OPTIONS}
-              onChange={(value) => {
-                refine(() => {
-                  setStatus(value)
-                })
-              }}
-              label="Filtrer par statut"
-              labelHidden
-              align="end"
-            />
-          </div>
-
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-            <p aria-live="polite" className="text-[13px] text-ink-muted">
-              {countOf(total, 'contact')}
-              {filtering
-                ? ` ${total > 1 ? 'correspondent' : 'correspond'} à ces filtres.`
-                : ' au total.'}
-              {filtering && (
-                <button
-                  type="button"
-                  onClick={clearFilters}
-                  className="ms-2 font-medium text-accent underline-offset-2 hover:underline"
-                >
-                  Effacer les filtres
-                </button>
-              )}
-            </p>
-
-            <Select
               value={String(limit)}
               options={PAGE_SIZES.map((size) => ({
                 value: String(size),
@@ -455,9 +348,24 @@ export function Contacts() {
               label="Contacts par page"
               labelHidden
               align="end"
-              className="w-36"
             />
           </div>
+
+          <p aria-live="polite" className="mt-3 text-[13px] text-ink-muted">
+            {countOf(total, 'contact')}
+            {filtering
+              ? ` ${total > 1 ? 'correspondent' : 'correspond'} à ces filtres.`
+              : ' au total.'}
+            {filtering && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="ms-2 font-medium text-accent underline-offset-2 hover:underline"
+              >
+                Effacer les filtres
+              </button>
+            )}
+          </p>
 
           {total === 0 ? (
             <EmptyState
@@ -487,9 +395,10 @@ export function Contacts() {
                           className="size-4 accent-accent"
                         />
                       </th>
+                      <SortHeader column="name" label="Nom" sort={sort} onSort={sortBy} />
                       <SortHeader
-                        column="name"
-                        label="Contact"
+                        column="email"
+                        label="E-mail"
                         sort={sort}
                         onSort={sortBy}
                       />
@@ -499,27 +408,21 @@ export function Contacts() {
                         sort={sort}
                         onSort={sortBy}
                       />
-                      <SortHeader
-                        column="campaign"
-                        label="Campagne"
-                        sort={sort}
-                        onSort={sortBy}
-                      />
                       <th scope="col" className="px-3 py-2.5 font-medium max-md:hidden">
-                        Origine
+                        Civilité
                       </th>
-                      <SortHeader
-                        column="status"
-                        label="Statut"
-                        sort={sort}
-                        onSort={sortBy}
-                      />
                       <SortHeader
                         column="created"
                         label="Ajouté le"
                         sort={sort}
                         onSort={sortBy}
                         className="max-lg:hidden"
+                      />
+                      <SortHeader
+                        column="source"
+                        label="Origine"
+                        sort={sort}
+                        onSort={sortBy}
                       />
                       <th scope="col" className="px-3 py-2.5">
                         <span className="sr-only">Actions</span>
@@ -620,20 +523,29 @@ export function Contacts() {
       )}
 
       {(dialog?.kind === 'create' || dialog?.kind === 'edit') && (
-        <ContactFormDialog
+        <AddContactDialog
           // Keyed so each opening starts from the contact it edits.
-          key={dialog.kind === 'edit' ? dialog.contact.id : 'new'}
+          key={editing?.id ?? 'new'}
           open
-          contact={dialog.kind === 'edit' ? dialog.contact : null}
-          drafts={drafts}
+          target="book"
+          {...(editing
+            ? {
+                initial: {
+                  email: editing.email,
+                  ...(editing.contactName ? { contact_name: editing.contactName } : {}),
+                  ...(editing.companyName ? { company_name: editing.companyName } : {}),
+                  ...(editing.salutation ? { salutation: editing.salutation } : {}),
+                },
+              }
+            : {})}
+          save={(row) =>
+            editing ? addressBookApi.update(editing.id, row) : addressBookApi.create(row)
+          }
           onClose={() => {
             setDialog(null)
           }}
-          onSaved={() => {
+          onAdded={() => {
             void fetchPage()
-          }}
-          onCampaignCreated={(campaign) => {
-            setCampaigns((current) => [campaign, ...current])
           }}
         />
       )}
@@ -644,10 +556,10 @@ export function Contacts() {
           onClose={() => {
             setDialog(null)
           }}
-          onCreated={(campaign) => {
+          onCreated={(campaignId) => {
             setDialog(null)
             setSelected(new Set())
-            void navigate(`/campaigns/${campaign}`)
+            void navigate(`/campaigns/${campaignId}`)
           }}
         />
       )}
@@ -671,10 +583,8 @@ export function Contacts() {
           dialog?.kind === 'delete' ? (
             <>
               <strong className="font-semibold text-ink">{dialog.contact.email}</strong>{' '}
-              sera retiré de la campagne « {dialog.contact.campaign.name} ».{' '}
-              {dialog.contact.status === 'sent'
-                ? 'L’historique garde la trace de l’envoi, sans le contact.'
-                : 'Il ne recevra aucun message de cette campagne.'}
+              sera retiré de vos contacts et des envois à venir. Les messages déjà envoyés
+              restent dans l’historique.
             </>
           ) : undefined
         }
@@ -691,18 +601,17 @@ export function Contacts() {
         icon="trash"
         title={`Supprimer ${countOf(selected.size, 'contact')} ?`}
         confirmLabel="Supprimer"
-        description="Chacun sera retiré de sa campagne. Pour ceux qui ont déjà reçu un message, l’historique garde la trace de l’envoi, sans le contact."
+        description="Ils seront retirés de vos contacts et des envois à venir. Les messages déjà envoyés restent dans l’historique."
       />
     </>
   )
 }
 
 /**
- * Turning a selection into a campaign.
- *
- * The contacts are copied server-side from their ids, into a new draft: nothing
- * is sent until the user writes the message and launches it. An address
- * selected twice, from two campaigns, is copied once.
+ * Turning a selection into a campaign: a new draft, then the contacts copied
+ * into it on the server. Nothing is sent until the user writes the message and
+ * launches it. If the copy fails, the empty draft is removed rather than left
+ * behind.
  */
 function CampaignFromSelectionDialog({
   contactIds,
@@ -728,16 +637,22 @@ function CampaignFromSelectionDialog({
     setBusy(true)
     setFailure(null)
 
+    let campaignId: string | null = null
+
     try {
-      const { campaign, imported } = await campaignsApi.followUp({
+      const campaign = await campaignsApi.create({
         name: name.trim().slice(0, 200),
-        contact_ids: contactIds,
         type,
       })
+      campaignId = campaign.id
+      const { imported } = await addressBookApi.copyToCampaign(campaign.id, contactIds)
 
       toast.success(`Campagne créée avec ${countOf(imported, 'contact')}.`)
       onCreated(campaign.id)
     } catch (err) {
+      if (campaignId) {
+        await campaignsApi.remove(campaignId).catch(() => undefined)
+      }
       setFailure(
         err instanceof ApiError && err.status === 0
           ? 'Le serveur est injoignable. Vérifiez votre connexion, puis réessayez.'
@@ -757,8 +672,8 @@ function CampaignFromSelectionDialog({
       description={
         <>
           Les {countOf(contactIds.length, 'contact sélectionné', 'contacts sélectionnés')}{' '}
-          seront copiés dans une nouvelle campagne en brouillon. Rien n’est envoyé : vous
-          écrirez le message, puis vous la lancerez.
+          deviendront les destinataires d’une nouvelle campagne en brouillon. Rien n’est
+          envoyé : vous écrirez le message, puis vous la lancerez.
         </>
       }
       footer={
@@ -868,7 +783,7 @@ function Row({
   onEdit: () => void
   onDelete: () => void
 }) {
-  const editable = contact.campaign.status === 'draft'
+  const empty = <span className="text-ink-subtle">—</span>
 
   return (
     <tr
@@ -883,64 +798,26 @@ function Row({
           className="size-4 accent-accent"
         />
       </td>
-
-      <td className="max-w-60 px-3 py-2.5">
-        <span className="block truncate font-medium">
-          {contact.contactName ?? contact.email}
-        </span>
-        {contact.contactName && (
-          <span className="block truncate text-xs text-ink-muted">{contact.email}</span>
-        )}
+      <td className="max-w-44 truncate px-3 py-2.5 font-medium">
+        {contact.contactName ?? empty}
       </td>
-
-      <td className="max-w-44 truncate px-3 py-2.5">
-        {contact.companyName ?? <span className="text-ink-subtle">—</span>}
-      </td>
-
-      <td className="max-w-52 px-3 py-2.5">
-        <Link
-          to={`/campaigns/${contact.campaign.id}`}
-          className="block truncate hover:text-accent hover:underline"
-        >
-          {contact.campaign.name}
-        </Link>
-        <span className="mt-1 block">
-          <StatusBadge status={contact.campaign.status} />
-        </span>
-      </td>
-
-      <td className="px-3 py-2.5 max-md:hidden">
-        <Badge tone={SOURCE_TONE[contact.source]}>{sourceLabel(contact.source)}</Badge>
-      </td>
-
-      <td className="px-3 py-2.5">
-        <Badge tone={STATUS_TONE[contact.status]}>
-          {contactStatusLabel(contact.status)}
-        </Badge>
-      </td>
-
+      <td className="max-w-60 truncate px-3 py-2.5">{contact.email}</td>
+      <td className="max-w-44 truncate px-3 py-2.5">{contact.companyName ?? empty}</td>
+      <td className="px-3 py-2.5 max-md:hidden">{contact.salutation ?? empty}</td>
       <td className="tabular px-3 py-2.5 whitespace-nowrap text-ink-muted max-lg:hidden">
         {formatDate(contact.createdAt)}
       </td>
-
+      <td className="px-3 py-2.5">
+        <Badge tone={SOURCE_TONE[contact.source]}>{sourceLabel(contact.source)}</Badge>
+      </td>
       <td className="px-3 py-2.5">
         <div className="flex justify-end gap-1">
-          {editable ? (
-            <IconButton
-              icon="edit"
-              size="sm"
-              label={`Modifier ${contact.email}`}
-              onClick={onEdit}
-            />
-          ) : (
-            <span
-              title="Campagne lancée : ce contact n’est plus modifiable."
-              className="flex size-8 items-center justify-center text-ink-subtle"
-            >
-              <Icon name="eye" size={15} />
-              <span className="sr-only">Lecture seule : la campagne a été lancée.</span>
-            </span>
-          )}
+          <IconButton
+            icon="edit"
+            size="sm"
+            label={`Modifier ${contact.email}`}
+            onClick={onEdit}
+          />
           <IconButton
             icon="trash"
             size="sm"

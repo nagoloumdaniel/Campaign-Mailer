@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { Icon } from '@/components/ui/Icon'
 import { Modal } from '@/components/ui/Modal'
 import { Pagination } from '@/components/ui/Pagination'
 import { SearchInput } from '@/components/ui/SearchInput'
@@ -16,8 +15,8 @@ import { countOf } from '@/services/format'
  *
  * A user writing to the same companies again, a month later, already has them:
  * exporting a CSV from one campaign to import it into the next is the chore
- * this removes. The list shows each address once, its most recent version,
- * and leaves out the ones this campaign already holds, so everything on screen
+ * this removes. The list is the address book, one entry per address, minus
+ * the ones this campaign already holds, so everything on screen
  * is something that can actually be added. The copy happens on the server,
  * from the ids alone.
  *
@@ -55,11 +54,10 @@ export function PickContactsDialog({
 
   const query = useMemo(
     () => ({
-      sort: 'company' as const,
+      sort: 'name' as const,
       order: 'asc' as const,
       limit: PAGE,
       offset,
-      unique: true,
       excludeCampaignId: campaignId,
       ...(search ? { search } : {}),
     }),
@@ -202,7 +200,7 @@ export function PickContactsDialog({
       icon="users"
       size="md"
       title="Ajouter depuis mes contacts"
-      description="Les contacts de vos autres campagnes. Chaque adresse n’apparaît qu’une fois, et celles déjà présentes dans cette campagne sont masquées."
+      description="Vos contacts, chaque adresse une fois. Ceux déjà présents dans cette campagne sont masqués."
       footer={
         <>
           <Button variant="ghost" onClick={close} disabled={busy}>
@@ -304,10 +302,6 @@ export function PickContactsDialog({
                             .filter(Boolean)
                             .join(' · ') || '—'}
                         </span>
-                      </span>
-                      <span className="hidden max-w-36 shrink-0 truncate text-xs text-ink-subtle sm:block">
-                        <Icon name="send" size={11} className="me-1 inline" />
-                        {contact.campaign.name}
                       </span>
                     </label>
                   </li>
