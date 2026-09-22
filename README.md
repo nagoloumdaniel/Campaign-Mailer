@@ -12,6 +12,8 @@ Intended users: students sending applications, recruiters, and small B2B prospec
 
 ## Status
 
+**Beta, and staying there for now (22 September 2026).** Campaign Mailer is online at campaignmailer.vercel.app and used by beta testers. The owner has chosen to keep it in beta: no public launch and no new roadmap phase until further notice, only requested changes and fixes.
+
 **One address book per account (22 September 2026).** Contacts now lists each email address once, whatever brought it (a CSV, a manual add, MailFind later), whether a campaign uses it or not, with its name, company, salutation, date added and origin. Every contact can be edited at any time: the campaigns still to send take the change, and what was already sent stays as it went out. The history leads with the launched campaigns and their results, sortable, and a click filters the send log to one campaign.
 
 **Scheduled launches, Monday to Saturday 09:00 to 19:00 (22 September 2026).** A launch goes out as soon as possible or at a day and hour the user picks. Sending happens Monday to Saturday from 09:00 to 18:59 on the computer's clock, Sundays closed. The pause between two messages (30 seconds plus jitter), the start hour and the time zone are no longer settings: the first two protect the Gmail account, the third is read from the browser. The campaign saves itself as it is written.

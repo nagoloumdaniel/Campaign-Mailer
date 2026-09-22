@@ -10,6 +10,8 @@ The application is proprietary. Copyright holder: Daniel Nagoloum Talla. See `LI
 
 ## State of the repository
 
+**In beta, and staying there (owner's decision, 22 September 2026).** The application is deployed (frontend on Vercel at campaignmailer.vercel.app, backend on Railway) and used by beta testers; the owner checked the 22 September changes in production and wants the project held at this stage for now. Do not start the public launch, a new roadmap phase or any Phase 9 item unless the owner asks for it explicitly; work is limited to what the owner requests and to fixes. Last changes of that day: send timing to the second, scheduled launches (Monday to Saturday, 09:00 to 19:00), automatic saving, the per-account address book with CSV import, and a history that leads with campaigns.
+
 **Phase 7 delivered, then the interface rebuilt at the owner's request (16–17 September 2026).** Phases 0 to 6 are complete: sign-in, campaigns, CSV import, attachments, the send engine, dashboard and statistics, data protection. Phase 7 added structured logs, Sentry, readiness and alerts, the throwaway-schema test runs, the Playwright journey and the documentation in `docs/`. The rebuild that followed put the web application on one design system and brought five rules with it: campaign types, five attachments, office-hours sending, the account-wide history with follow-ups, and the quota advice. Its migrations are applied to the development database. Phase 8 (production deployment) is next.
 
 `ROADMAP.md` is the plan of record: ten phases, and within a phase one bullet is one ticket, one commit on `main`. Read it before starting work. It carries the definition of done for each phase and annotates every work item with the skills to load before implementing it.
@@ -22,6 +24,7 @@ The application is proprietary. Copyright holder: Daniel Nagoloum Talla. See `LI
 - **Still one commit and one push per ticket.** The phase is the review unit; the ticket stays the commit unit, so the history keeps naming what each change was for and a failure stays bisectable.
 - Commit messages follow Conventional Commits, and the body explains why, not only what.
 - Update the progress checklist in `README.md` in the same commit that advances it.
+- **The project stays in beta until the owner says otherwise** (22 September 2026): no public launch, no new phase, no Phase 9 item on our own initiative.
 - Never start a Phase 9 item before Phase 8 is signed off. Scope drift toward post-MVP features is the project's most likely cause of delay.
 
 ## Commands
