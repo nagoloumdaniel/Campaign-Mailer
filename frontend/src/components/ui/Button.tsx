@@ -44,11 +44,11 @@ interface CommonProps {
   loading?: boolean
   block?: boolean
   /**
-   * Below 640 px, the icon alone in a square button; the label stays for
-   * screen readers and shows as a tooltip. For a row of actions that would
-   * otherwise run off a phone's screen.
+   * A shorter label shown below 640 px, in place of the full one: "Importer"
+   * for "Importer un fichier". For a row of actions that would otherwise run
+   * off a phone's screen (owner's request, 22 September 2026).
    */
-  compact?: boolean | undefined
+  shortLabel?: string | undefined
   className?: string
   children?: ReactNode
 }
@@ -60,7 +60,7 @@ function classesOf({
   variant = 'secondary',
   size = 'md',
   block,
-  compact,
+  shortLabel,
   className = '',
 }: CommonProps): string {
   return [
@@ -68,21 +68,24 @@ function classesOf({
     VARIANTS[variant],
     SIZES[size],
     block ? 'w-full' : '',
-    compact ? (size === 'sm' ? 'max-sm:w-8 max-sm:px-0' : 'max-sm:w-10 max-sm:px-0') : '',
+    // A little less padding with the short label, so a row of three fits.
+    shortLabel ? 'max-sm:px-3' : '',
     className,
   ]
     .filter(Boolean)
     .join(' ')
 }
 
-/** The label, hidden on a phone when the button is compact but still read out. */
-function labelOf(children: ReactNode, compact: boolean | undefined): ReactNode {
-  return compact ? <span className="max-sm:sr-only">{children}</span> : children
-}
-
-/** The tooltip a compact button shows on a phone, where its label is hidden. */
-function titleOf(children: ReactNode, compact: boolean | undefined): string | undefined {
-  return compact && typeof children === 'string' ? children : undefined
+/** The label, swapped for the short one on a phone when there is one. */
+function labelOf(children: ReactNode, shortLabel: string | undefined): ReactNode {
+  return shortLabel ? (
+    <>
+      <span className="max-sm:hidden">{children}</span>
+      <span className="sm:hidden">{shortLabel}</span>
+    </>
+  ) : (
+    children
+  )
 }
 
 /** The spinner shown inside a button while its action runs. */
@@ -102,7 +105,7 @@ export function Button({
   iconAfter,
   loading = false,
   block = false,
-  compact,
+  shortLabel,
   className,
   children,
   disabled,
@@ -117,18 +120,17 @@ export function Button({
       // Announced, not just drawn: a screen reader otherwise reads the old
       // label while the action is still running.
       aria-busy={loading || undefined}
-      title={titleOf(children, compact)}
       className={classesOf({
         variant,
         size,
         block,
-        compact,
+        shortLabel,
         ...(className ? { className } : {}),
       })}
       {...rest}
     >
       {loading ? <Spinner /> : icon && <Icon name={icon} size={iconSize} />}
-      {labelOf(children, compact)}
+      {labelOf(children, shortLabel)}
       {iconAfter && !loading && <Icon name={iconAfter} size={iconSize} />}
     </button>
   )
@@ -148,6 +150,7 @@ export function LinkButton({
   icon,
   iconAfter,
   block = false,
+  shortLabel,
   className,
   children,
 }: LinkButtonProps) {
@@ -157,10 +160,16 @@ export function LinkButton({
     <Link
       to={to}
       state={state}
-      className={classesOf({ variant, size, block, ...(className ? { className } : {}) })}
+      className={classesOf({
+        variant,
+        size,
+        block,
+        shortLabel,
+        ...(className ? { className } : {}),
+      })}
     >
       {icon && <Icon name={icon} size={iconSize} />}
-      {children}
+      {labelOf(children, shortLabel)}
       {iconAfter && <Icon name={iconAfter} size={iconSize} />}
     </Link>
   )
@@ -189,7 +198,7 @@ export function AnchorButton({
   icon,
   iconAfter,
   block = false,
-  compact,
+  shortLabel,
   className,
   children,
 }: AnchorButtonProps) {
@@ -201,17 +210,16 @@ export function AnchorButton({
       download={download}
       target={target}
       rel={rel}
-      title={titleOf(children, compact)}
       className={classesOf({
         variant,
         size,
         block,
-        compact,
+        shortLabel,
         ...(className ? { className } : {}),
       })}
     >
       {icon && <Icon name={icon} size={iconSize} />}
-      {labelOf(children, compact)}
+      {labelOf(children, shortLabel)}
       {iconAfter && <Icon name={iconAfter} size={iconSize} />}
     </a>
   )

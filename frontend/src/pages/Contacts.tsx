@@ -250,7 +250,7 @@ export function Contacts() {
                 download
                 variant="secondary"
                 icon="download"
-                compact
+                shortLabel="Exporter"
               >
                 Exporter en CSV
               </AnchorButton>
@@ -258,7 +258,7 @@ export function Contacts() {
             <Button
               variant="secondary"
               icon="upload"
-              compact
+              shortLabel="Importer"
               onClick={() => {
                 setDialog({ kind: 'import' })
               }}
@@ -268,7 +268,7 @@ export function Contacts() {
             <Button
               variant="primary"
               icon="plus"
-              compact
+              shortLabel="Ajouter"
               onClick={() => {
                 setDialog({ kind: 'create' })
               }}
