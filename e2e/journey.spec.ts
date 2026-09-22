@@ -172,4 +172,24 @@ test('a user prepares a campaign, launches it and follows it to the end', async 
     // The contacts were copied server-side: nothing had to be re-imported.
     await expect(page.getByRole('heading', { name: 'Contacts (2)' })).toBeVisible()
   })
+
+  await test.step('the address book lists every campaign’s contacts and edits a draft’s', async () => {
+    // Exact: the campaign page has a "Contacts (2)" heading, not a link.
+    await page.getByRole('link', { name: 'Contacts', exact: true }).click()
+    await expect(page.getByRole('heading', { level: 1, name: 'Contacts' })).toBeVisible()
+
+    // Two sent by the first campaign, two copied into the follow-up.
+    await expect(page.getByText('4 contacts au total.')).toBeVisible()
+
+    await page.getByRole('searchbox').fill('ana@')
+    await expect(page.getByText('2 contacts correspondent à ces filtres.')).toBeVisible()
+
+    // Only the follow-up is a draft, so only its row can be edited.
+    await page.getByRole('button', { name: 'Modifier ana@example.test' }).click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByLabel('Nom du contact').fill('Ana Lopez')
+    await dialog.getByRole('button', { name: 'Enregistrer' }).click()
+
+    await expect(page.getByText('Ana Lopez')).toBeVisible()
+  })
 })

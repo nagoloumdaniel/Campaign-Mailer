@@ -339,8 +339,8 @@ export function createCampaignRepository(pool: Pool): CampaignRepository {
         // filtered by owner: an id from another account selects nothing rather
         // than copying a stranger's address into this campaign.
         const copied = await client.query(
-          `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation)
-           SELECT $1, ct.email, ct.contact_name, ct.company_name, ct.salutation
+          `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation, source)
+           SELECT $1, ct.email, ct.contact_name, ct.company_name, ct.salutation, ct.source
            FROM contacts ct
            JOIN campaigns src ON src.id = ct.campaign_id
            WHERE ct.id = ANY($2::uuid[]) AND src.user_id = $3

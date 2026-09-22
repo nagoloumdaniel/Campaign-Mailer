@@ -18,14 +18,16 @@ import { UserMenu } from './UserMenu'
  * there is nothing to separate it from, and a permanent shadow there is the
  * detail that makes an interface look printed on.
  *
- * Three destinations and no more. Everything else in the application is
+ * Four destinations and no more. Everything else in the application is
  * reached from one of them, and a navigation with seven entries is a
- * navigation nobody reads.
+ * navigation nobody reads. Contacts joined on 22 September 2026: once an
+ * account holds several campaigns, "who do I already have" is its own question.
  */
 
 const NAV: { to: string; label: string; icon: IconName; end?: boolean }[] = [
   { to: '/', label: 'Accueil', icon: 'home', end: true },
   { to: '/campaigns', label: 'Campagnes', icon: 'send' },
+  { to: '/contacts', label: 'Contacts', icon: 'users' },
   { to: '/history', label: 'Historique', icon: 'history' },
 ]
 

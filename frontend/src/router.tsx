@@ -65,6 +65,7 @@ export const router = createBrowserRouter([
             path: 'campaigns/:id',
             ...page(() => import('@/pages/CampaignEditor'), 'CampaignEditor'),
           },
+          { path: 'contacts', ...page(() => import('@/pages/Contacts'), 'Contacts') },
           { path: 'history', ...page(() => import('@/pages/History'), 'History') },
           { path: 'account', ...page(() => import('@/pages/Account'), 'Account') },
         ],

@@ -4,6 +4,7 @@ import { env } from '../config/env.js'
 import { pool } from '../db/pool.js'
 import { requireAuth } from '../middleware/auth.js'
 import { requireCurrentTerms } from '../middleware/terms.js'
+import { createAddressBookRepository } from '../services/addressBook.js'
 import { createCampaignRepository } from '../services/campaigns.js'
 import { deleteAccount } from '../services/accountDeletion.js'
 import { createAuditLog } from '../services/audit.js'
@@ -20,6 +21,7 @@ import { createStatsRepository } from '../services/stats.js'
 import { STARTER_TEMPLATES } from '../services/starterTemplates.js'
 import { TEMPLATE_VARIABLES } from '../services/template.js'
 
+import { createAddressBookRouter } from './addressBook.js'
 import { createAttachmentRouter } from './attachment.js'
 import { authRouter } from './auth.js'
 import { createCampaignRouter } from './campaigns.js'
@@ -84,7 +86,7 @@ export function createApiRouter(deps: ApiRouterDeps = {}): Router {
   // current terms being accepted. The account routes above do not: exporting
   // and deleting one's data are rights.
   apiRouter.use(
-    ['/campaigns', '/dashboard', '/history', '/templates'],
+    ['/campaigns', '/contacts', '/dashboard', '/history', '/templates'],
     requireCurrentTerms,
   )
 
@@ -102,6 +104,10 @@ export function createApiRouter(deps: ApiRouterDeps = {}): Router {
   apiRouter.use(
     '/history',
     createHistoryRouter({ history: createHistoryRepository(pool) }),
+  )
+  apiRouter.use(
+    '/contacts',
+    createAddressBookRouter({ addressBook: createAddressBookRepository(pool) }),
   )
   const statsRepository = createStatsRepository(pool)
 

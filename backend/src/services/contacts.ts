@@ -173,8 +173,8 @@ export function createContactRepository(pool: Pool): ContactRepository {
 
     async add(campaignId, contact) {
       const { rows } = await pool.query<ContactRow>(
-        `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation, source)
+         VALUES ($1, $2, $3, $4, $5, 'manual')
          ON CONFLICT DO NOTHING
          RETURNING ${COLUMNS}`,
         [
