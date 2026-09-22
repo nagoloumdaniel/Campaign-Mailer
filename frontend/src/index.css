@@ -89,6 +89,24 @@
 }
 
 /* ---------------------------------------------------------------------------
+   The glass rim. Not in @theme, which drops variables no utility class uses,
+   and these are read by hand from `glass-rim`.
+
+   A pane over a white page has almost nothing to blur — a white card on a
+   near-white canvas blurs to the same white — so what tells the eye it is
+   looking through something is the edge: a lit top, where the light catches
+   the bevel, and a faint ring around the whole pane. Over a dark ground the
+   same two lines, far quieter, do the same work.
+   ------------------------------------------------------------------------- */
+:root {
+  --glass-lit: oklch(100% 0 0 / 0.75);
+  /* Neutral rather than white on the light theme: a white ring on a white page
+     draws nothing, and the pane would lose its shape before the page scrolls
+     far enough to cast a shadow under it. */
+  --glass-edge: oklch(64% 0.012 264 / 0.26);
+}
+
+/* ---------------------------------------------------------------------------
    Dark theme. Only the tokens change; not one component branches on the theme.
    The surfaces lift rather than the text dimming: a dark interface reads by
    its planes, and grey-on-grey text is where dark themes usually fail.
@@ -129,6 +147,9 @@
   --shadow-soft: 0 1px 2px oklch(0% 0 0 / 0.3);
   --shadow-card: 0 1px 3px oklch(0% 0 0 / 0.35), 0 8px 24px -12px oklch(0% 0 0 / 0.5);
   --shadow-pop: 0 4px 12px oklch(0% 0 0 / 0.4), 0 24px 48px -16px oklch(0% 0 0 / 0.6);
+
+  --glass-lit: oklch(100% 0 0 / 0.14);
+  --glass-edge: oklch(100% 0 0 / 0.07);
 }
 
 /* ===========================================================================
@@ -241,8 +262,20 @@
     var(--color-surface) var(--glass-tint, 72%),
     transparent
   );
-  backdrop-filter: blur(var(--glass-blur, 16px)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--glass-blur, 16px)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur, 16px)) saturate(var(--glass-saturation, 180%));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 16px))
+    saturate(var(--glass-saturation, 180%));
+}
+
+/* The edge that makes a translucent slab read as a pane rather than as a weak
+   white. It carries the cast shadow too, through `--glass-cast`, because a
+   second `box-shadow` utility would replace this one rather than add to it. */
+@utility glass-rim {
+  box-shadow:
+    inset 0 1px 0 var(--glass-lit),
+    inset 0 0 0 1px var(--glass-edge),
+    var(--glass-cast, 0 0 transparent);
+  transition: box-shadow 300ms var(--ease-out);
 }
 
 /* The band the navigation floats in.
@@ -272,16 +305,16 @@
   /* The light pass reaches furthest down, so focus comes back over a distance
      rather than at an edge. */
   &::before {
-    backdrop-filter: blur(5px);
-    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
     mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
   }
 
   /* The heavy pass stops just under the bar. */
   &::after {
-    backdrop-filter: blur(16px) saturate(180%);
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    backdrop-filter: blur(22px) saturate(190%);
+    -webkit-backdrop-filter: blur(22px) saturate(190%);
     -webkit-mask-image: linear-gradient(to bottom, #000 48%, transparent 80%);
     mask-image: linear-gradient(to bottom, #000 48%, transparent 80%);
   }
