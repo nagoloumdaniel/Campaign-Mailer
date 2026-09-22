@@ -250,6 +250,7 @@ export function Contacts() {
                 download
                 variant="secondary"
                 icon="download"
+                compact
               >
                 Exporter en CSV
               </AnchorButton>
@@ -257,6 +258,7 @@ export function Contacts() {
             <Button
               variant="secondary"
               icon="upload"
+              compact
               onClick={() => {
                 setDialog({ kind: 'import' })
               }}
@@ -266,6 +268,7 @@ export function Contacts() {
             <Button
               variant="primary"
               icon="plus"
+              compact
               onClick={() => {
                 setDialog({ kind: 'create' })
               }}
@@ -319,7 +322,7 @@ export function Contacts() {
                 setSearch(value)
               })
             }}
-            placeholder="Rechercher un nom, une adresse ou une entreprise…"
+            placeholder="Nom, adresse ou entreprise…"
             label="Rechercher un contact"
           />
 
@@ -403,89 +406,128 @@ export function Contacts() {
               }
             />
           ) : (
-            <Card className="mt-3 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-xl text-left text-[13px] md:min-w-3xl">
-                  <thead className="border-b border-border bg-surface-2 text-xs text-ink-muted">
-                    <tr>
-                      <th scope="col" className="w-10 px-3 py-2.5">
-                        <input
-                          type="checkbox"
-                          checked={pageSelected}
-                          aria-label="Tout sélectionner sur cette page"
-                          onChange={togglePage}
-                          className="size-4 accent-accent"
-                        />
-                      </th>
-                      <SortHeader column="name" label="Nom" sort={sort} onSort={sortBy} />
-                      <SortHeader
-                        column="email"
-                        label="E-mail"
-                        sort={sort}
-                        onSort={sortBy}
-                      />
-                      <SortHeader
-                        column="company"
-                        label="Entreprise"
-                        sort={sort}
-                        onSort={sortBy}
-                      />
-                      <th scope="col" className="px-3 py-2.5 font-medium max-md:hidden">
-                        Civilité
-                      </th>
-                      <SortHeader
-                        column="created"
-                        label="Ajouté le"
-                        sort={sort}
-                        onSort={sortBy}
-                        className="max-lg:hidden"
-                      />
-                      <SortHeader
-                        column="source"
-                        label="Origine"
-                        sort={sort}
-                        onSort={sortBy}
-                      />
-                      <th scope="col" className="px-3 py-2.5">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
+            <>
+              {/* On a phone, one card per contact: six columns do not fit a
+                375 px screen, and a table to scroll sideways hides half of
+                each line. From 640 px up, the table. */}
+              <ul className="mt-3 space-y-2 sm:hidden">
+                <li className="flex items-center gap-2 px-1 text-xs text-ink-muted">
+                  <input
+                    type="checkbox"
+                    checked={pageSelected}
+                    aria-label="Tout sélectionner sur cette page"
+                    onChange={togglePage}
+                    className="size-4 accent-accent"
+                  />
+                  Tout sélectionner
+                </li>
+                {contacts.map((contact) => (
+                  <ContactCard
+                    key={contact.id}
+                    contact={contact}
+                    selected={selected.has(contact.id)}
+                    onToggle={() => {
+                      toggle(contact.id)
+                    }}
+                    onEdit={() => {
+                      setDialog({ kind: 'edit', contact })
+                    }}
+                    onDelete={() => {
+                      setDialog({ kind: 'delete', contact })
+                    }}
+                  />
+                ))}
+              </ul>
 
-                  <tbody>
-                    {load.state === 'loading'
-                      ? Array.from({ length: 6 }, (_, index) => (
-                          <tr
-                            key={`skeleton-${String(index)}`}
-                            className="border-b border-border last:border-0"
-                          >
-                            {Array.from({ length: 6 }, (_, cell) => (
-                              <td key={cell} className="px-3 py-3">
-                                <Skeleton className="h-3 w-full" />
-                              </td>
-                            ))}
-                          </tr>
-                        ))
-                      : contacts.map((contact) => (
-                          <Row
-                            key={contact.id}
-                            contact={contact}
-                            selected={selected.has(contact.id)}
-                            onToggle={() => {
-                              toggle(contact.id)
-                            }}
-                            onEdit={() => {
-                              setDialog({ kind: 'edit', contact })
-                            }}
-                            onDelete={() => {
-                              setDialog({ kind: 'delete', contact })
-                            }}
+              <Card className="mt-3 overflow-hidden max-sm:hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-xl text-left text-[13px] md:min-w-3xl">
+                    <thead className="border-b border-border bg-surface-2 text-xs text-ink-muted">
+                      <tr>
+                        <th scope="col" className="w-10 px-3 py-2.5">
+                          <input
+                            type="checkbox"
+                            checked={pageSelected}
+                            aria-label="Tout sélectionner sur cette page"
+                            onChange={togglePage}
+                            className="size-4 accent-accent"
                           />
-                        ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+                        </th>
+                        <SortHeader
+                          column="name"
+                          label="Nom"
+                          sort={sort}
+                          onSort={sortBy}
+                        />
+                        <SortHeader
+                          column="email"
+                          label="E-mail"
+                          sort={sort}
+                          onSort={sortBy}
+                        />
+                        <SortHeader
+                          column="company"
+                          label="Entreprise"
+                          sort={sort}
+                          onSort={sortBy}
+                        />
+                        <th scope="col" className="px-3 py-2.5 font-medium max-md:hidden">
+                          Civilité
+                        </th>
+                        <SortHeader
+                          column="created"
+                          label="Ajouté le"
+                          sort={sort}
+                          onSort={sortBy}
+                          className="max-lg:hidden"
+                        />
+                        <SortHeader
+                          column="source"
+                          label="Origine"
+                          sort={sort}
+                          onSort={sortBy}
+                        />
+                        <th scope="col" className="px-3 py-2.5">
+                          <span className="sr-only">Actions</span>
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {load.state === 'loading'
+                        ? Array.from({ length: 6 }, (_, index) => (
+                            <tr
+                              key={`skeleton-${String(index)}`}
+                              className="border-b border-border last:border-0"
+                            >
+                              {Array.from({ length: 6 }, (_, cell) => (
+                                <td key={cell} className="px-3 py-3">
+                                  <Skeleton className="h-3 w-full" />
+                                </td>
+                              ))}
+                            </tr>
+                          ))
+                        : contacts.map((contact) => (
+                            <Row
+                              key={contact.id}
+                              contact={contact}
+                              selected={selected.has(contact.id)}
+                              onToggle={() => {
+                                toggle(contact.id)
+                              }}
+                              onEdit={() => {
+                                setDialog({ kind: 'edit', contact })
+                              }}
+                              onDelete={() => {
+                                setDialog({ kind: 'delete', contact })
+                              }}
+                            />
+                          ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </>
           )}
 
           <Pagination
@@ -802,6 +844,65 @@ function SortHeader({
         />
       </button>
     </th>
+  )
+}
+
+/** One contact on a phone: the same details and actions as a table row. */
+function ContactCard({
+  contact,
+  selected,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  contact: BookContact
+  selected: boolean
+  onToggle: () => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const details = [contact.companyName, contact.salutation].filter(Boolean).join(' · ')
+
+  return (
+    <li
+      className={`flex items-start gap-3 rounded-2xl border border-border p-3 ${selected ? 'bg-accent-soft/40' : 'bg-surface'}`}
+    >
+      <input
+        type="checkbox"
+        checked={selected}
+        aria-label={`Sélectionner ${contact.email}`}
+        onChange={onToggle}
+        className="mt-1 size-4 shrink-0 accent-accent"
+      />
+
+      <div className="min-w-0 flex-1 text-[13px]">
+        <p className="truncate font-medium">{contact.contactName ?? contact.email}</p>
+        {contact.contactName && (
+          <p className="truncate text-ink-muted">{contact.email}</p>
+        )}
+        {details && <p className="truncate text-xs text-ink-muted">{details}</p>}
+        <p className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-ink-subtle">
+          <Badge tone={SOURCE_TONE[contact.source]}>{sourceLabel(contact.source)}</Badge>
+          <span className="tabular">Ajouté le {formatDate(contact.createdAt)}</span>
+        </p>
+      </div>
+
+      <div className="flex shrink-0 gap-0.5">
+        <IconButton
+          icon="edit"
+          size="sm"
+          label={`Modifier ${contact.email}`}
+          onClick={onEdit}
+        />
+        <IconButton
+          icon="trash"
+          size="sm"
+          label={`Supprimer ${contact.email}`}
+          onClick={onDelete}
+          className="hover:text-danger"
+        />
+      </div>
+    </li>
   )
 }
 

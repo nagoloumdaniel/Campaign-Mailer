@@ -51,7 +51,12 @@ export function PageHeader({
           )}
         </div>
 
-        {action && <div className="flex shrink-0 flex-wrap gap-2">{action}</div>}
+        {/* Right-aligned, also when a phone pushes them under the title. */}
+        {action && (
+          <div className="ms-auto flex shrink-0 flex-wrap justify-end gap-2">
+            {action}
+          </div>
+        )}
       </div>
     </div>
   )

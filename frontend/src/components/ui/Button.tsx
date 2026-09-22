@@ -43,6 +43,12 @@ interface CommonProps {
   /** Swaps the label for a waiting one and blocks a second click. */
   loading?: boolean
   block?: boolean
+  /**
+   * Below 640 px, the icon alone in a square button; the label stays for
+   * screen readers and shows as a tooltip. For a row of actions that would
+   * otherwise run off a phone's screen.
+   */
+  compact?: boolean | undefined
   className?: string
   children?: ReactNode
 }
@@ -54,11 +60,29 @@ function classesOf({
   variant = 'secondary',
   size = 'md',
   block,
+  compact,
   className = '',
 }: CommonProps): string {
-  return [BASE, VARIANTS[variant], SIZES[size], block ? 'w-full' : '', className]
+  return [
+    BASE,
+    VARIANTS[variant],
+    SIZES[size],
+    block ? 'w-full' : '',
+    compact ? (size === 'sm' ? 'max-sm:w-8 max-sm:px-0' : 'max-sm:w-10 max-sm:px-0') : '',
+    className,
+  ]
     .filter(Boolean)
     .join(' ')
+}
+
+/** The label, hidden on a phone when the button is compact but still read out. */
+function labelOf(children: ReactNode, compact: boolean | undefined): ReactNode {
+  return compact ? <span className="max-sm:sr-only">{children}</span> : children
+}
+
+/** The tooltip a compact button shows on a phone, where its label is hidden. */
+function titleOf(children: ReactNode, compact: boolean | undefined): string | undefined {
+  return compact && typeof children === 'string' ? children : undefined
 }
 
 /** The spinner shown inside a button while its action runs. */
@@ -78,6 +102,7 @@ export function Button({
   iconAfter,
   loading = false,
   block = false,
+  compact,
   className,
   children,
   disabled,
@@ -92,11 +117,18 @@ export function Button({
       // Announced, not just drawn: a screen reader otherwise reads the old
       // label while the action is still running.
       aria-busy={loading || undefined}
-      className={classesOf({ variant, size, block, ...(className ? { className } : {}) })}
+      title={titleOf(children, compact)}
+      className={classesOf({
+        variant,
+        size,
+        block,
+        compact,
+        ...(className ? { className } : {}),
+      })}
       {...rest}
     >
       {loading ? <Spinner /> : icon && <Icon name={icon} size={iconSize} />}
-      {children}
+      {labelOf(children, compact)}
       {iconAfter && !loading && <Icon name={iconAfter} size={iconSize} />}
     </button>
   )
@@ -157,6 +189,7 @@ export function AnchorButton({
   icon,
   iconAfter,
   block = false,
+  compact,
   className,
   children,
 }: AnchorButtonProps) {
@@ -168,10 +201,17 @@ export function AnchorButton({
       download={download}
       target={target}
       rel={rel}
-      className={classesOf({ variant, size, block, ...(className ? { className } : {}) })}
+      title={titleOf(children, compact)}
+      className={classesOf({
+        variant,
+        size,
+        block,
+        compact,
+        ...(className ? { className } : {}),
+      })}
     >
       {icon && <Icon name={icon} size={iconSize} />}
-      {children}
+      {labelOf(children, compact)}
       {iconAfter && <Icon name={iconAfter} size={iconSize} />}
     </a>
   )
