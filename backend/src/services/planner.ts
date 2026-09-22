@@ -24,6 +24,13 @@ export const LAST_SEND_HOUR = 17
 /** The instant the window closes: the first millisecond of hour 18. */
 const WINDOW_END_HOUR = LAST_SEND_HOUR + 1
 
+/**
+ * How long after a slot frees its send is queued. The log row that frees it is
+ * counted by the database's clock; a second of margin keeps a send from landing
+ * on the instant it is still counted.
+ */
+export const FREED_SLOT_MARGIN_MS = 1000
+
 export interface PlanInput {
   now: Date
   /** IANA zone. The start hour is the user's morning, not the server's. */
@@ -33,6 +40,12 @@ export interface PlanInput {
   pauseMs: number
   /** What this campaign sent over the last 24 hours. */
   sentByCampaign: number
+  /**
+   * When each of those sends leaves the 24-hour window, oldest first, in epoch
+   * milliseconds. A slot of the day's pace frees at each of these instants, and
+   * the plan queues a send for it there rather than waiting for the next pass.
+   */
+  campaignFreesAt?: readonly number[] | undefined
   /** What the account sent over the last 24 hours, across every campaign. */
   sentByAccount: number
   accountLimit: number
@@ -123,17 +136,37 @@ export function planDay(input: PlanInput): PlanOutcome {
     return { kind: 'account_quota_reached' }
   }
 
-  if (campaignBudget <= 0) {
+  const frees = input.campaignFreesAt ?? []
+  const nowMs = input.now.getTime()
+
+  // Past the pace with nothing leaving the window within the day: the plan has
+  // nothing to hang a send on. With slots freeing, the loop below queues each
+  // one at the second it frees, which is what keeps a campaign that sent its
+  // 46 at 10:00 yesterday sending at 10:00 today rather than at the next pass.
+  if (campaignBudget <= 0 && frees.length < 1 - campaignBudget) {
     return { kind: 'campaign_quota_reached' }
   }
 
   const random = input.random ?? Math.random
-  const budget = Math.min(campaignBudget, accountBudget)
   const remaining = windowRemainingMs(input.now, input.timezone)
   const sends: PlannedSend[] = []
   let delayMs = 0
 
-  for (const contactId of input.pendingContactIds.slice(0, budget)) {
+  for (const [index, contactId] of input.pendingContactIds
+    .slice(0, accountBudget)
+    .entries()) {
+    // The send is allowed once the window holds fewer than the day's pace:
+    // `needed` sends must have left it by then.
+    const needed = input.sentByCampaign + index - input.mailsPerDay + 1
+
+    if (needed > 0) {
+      const freesAt = frees[needed - 1]
+      if (freesAt === undefined) {
+        break
+      }
+      delayMs = Math.max(delayMs, freesAt - nowMs + FREED_SLOT_MARGIN_MS)
+    }
+
     // A send whose delay lands past 17:59 is not queued: 450 messages thirty
     // seconds apart run nearly four hours, and a plan made at 16:00 would
     // otherwise deliver into the night. The contact stays pending and the next

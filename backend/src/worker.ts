@@ -6,10 +6,12 @@ import {
   CAMPAIGN_QUEUE,
   QUEUE_PREFIX,
   SEND_JOB,
+  WAKE_CHANNEL,
   createQueueConnection,
 } from './jobs/connection.js'
 import { HEARTBEAT_EVERY_MS, writeHeartbeat } from './jobs/heartbeat.js'
 import { createIdleController, readQueueActivity } from './jobs/idleSleep.js'
+import { nextPlanDelay } from './jobs/planClock.js'
 import {
   createDispatchProcessor,
   createSendProcessor,
@@ -67,9 +69,6 @@ const reporting = initErrorReporting({
   service: 'worker',
 })
 
-/** How often every scheduled or running campaign is planned again. */
-const DISPATCH_EVERY_MS = 15 * 60 * 1000
-
 /**
  * How often a sleeping worker looks for work, and how far ahead it looks.
  * The horizon is longer than the interval so a job due just after one check is
@@ -84,6 +83,14 @@ const IDLE_HORIZON_MS = 2.5 * 60 * 1000
  * seconds. The contact's claim lasts ten minutes, so nothing is lost by waiting.
  */
 const STALLED_INTERVAL_MS = 5 * 60 * 1000
+
+/**
+ * The timer for the next plan, and when it fires. Declared before the worker
+ * starts: a dispatch job waiting in the queue at startup runs at once and sets
+ * them (see planNoLaterThan).
+ */
+let planTimer: NodeJS.Timeout | undefined
+let nextPlanAt = Number.POSITIVE_INFINITY
 
 const connection = createQueueConnection(env.redisUrl)
 const queues = createQueues(connection)
@@ -164,6 +171,8 @@ const worker = new Worker<CampaignJobData>(
 
     const outcomes = await processDispatch(job.data)
     jobLog.info({ campaigns: outcomes.size }, 'Dispatch job finished')
+    // A campaign launched at 9:50 says "10:00"; the timer must not miss it.
+    planNoLaterThan(Date.now() + nextPlanDelay(outcomes.values(), Date.now()))
   },
   // One job at a time. The pace between messages is the point of this
   // product, the planner already spreads the sends out, and a plan is a few
@@ -257,14 +266,37 @@ function checkSendErrorRate(): void {
  */
 function planAll(): void {
   processDispatch({})
-    .then(() => {
+    .then((outcomes) => {
+      planNoLaterThan(Date.now() + nextPlanDelay(outcomes.values(), Date.now()), true)
       checkIdle()
       checkSendErrorRate()
     })
     .catch((err: unknown) => {
       log.error({ err }, 'Scheduled dispatch failed')
       reportError(err, { service: 'worker', job: 'dispatch' })
+      planNoLaterThan(Date.now() + nextPlanDelay([], Date.now()), true)
     })
+}
+
+/**
+ * One timer for the next plan, set to the earliest instant any campaign asked
+ * for (jobs/planClock.ts). `replace` is for the plan that just ran: its answer
+ * stands even when it is later than the one it consumed.
+ */
+function planNoLaterThan(at: number, replace = false): void {
+  if (!replace && at >= nextPlanAt) {
+    return
+  }
+
+  clearTimeout(planTimer)
+  nextPlanAt = at
+  planTimer = setTimeout(
+    () => {
+      nextPlanAt = Number.POSITIVE_INFINITY
+      planAll()
+    },
+    Math.max(0, at - Date.now()),
+  )
 }
 
 // Earlier versions scheduled the plan as a repeatable job. Left in Redis, it
@@ -272,9 +304,25 @@ function planAll(): void {
 // no-op.
 await queues.queue.removeJobScheduler('dispatch-all')
 
-const dispatchTimer = setInterval(planAll, DISPATCH_EVERY_MS)
 const idleTimer = setInterval(checkIdle, IDLE_CHECK_EVERY_MS)
 planAll()
+
+/**
+ * Woken by the API when a user starts or resumes a campaign, so its first
+ * message does not wait for the next idle check (jobs/connection.ts). A
+ * connection in subscriber mode can run nothing else, hence its own.
+ */
+const wakeListener = connection.duplicate()
+wakeListener.on('error', (err: Error) => {
+  log.warn({ err }, 'Wake channel connection error')
+})
+wakeListener.on('message', () => {
+  checkIdle()
+})
+await wakeListener.subscribe(WAKE_CHANNEL).catch((err: unknown) => {
+  // Without it a launch waits for the two-minute check, as it used to.
+  log.warn({ err }, 'Could not listen for wake calls')
+})
 
 /**
  * Once a day, send logs and audit events past twelve months are deleted
@@ -354,7 +402,7 @@ log.info({ env: env.nodeEnv, errorReporting: reporting }, 'Worker started')
 async function shutdown(signal: string): Promise<void> {
   log.info({ signal }, 'Finishing the job in hand')
 
-  clearInterval(dispatchTimer)
+  clearTimeout(planTimer)
   clearInterval(idleTimer)
   clearInterval(retentionTimer)
   clearInterval(heartbeatTimer)
@@ -367,6 +415,7 @@ async function shutdown(signal: string): Promise<void> {
 
   await worker.close()
   await Promise.allSettled([queues.close(), closePool(), closeErrorReporting()])
+  await wakeListener.quit().catch(() => undefined)
   await connection.quit().catch(() => undefined)
 
   process.exit(0)

@@ -88,6 +88,41 @@ describe('how many', () => {
     })
   })
 
+  it('queues each send at the second a slot of the pace frees', () => {
+    // Yesterday's 46 went out from 10:30 one minute apart; the first leaves
+    // the 24-hour window right now, the next ones a minute apart after it.
+    const now = input().now.getTime()
+    const frees = Array.from({ length: 46 }, (_, i) => now + i * 60_000)
+    const planned = sends({ sentByCampaign: 46, campaignFreesAt: frees })
+
+    assert.equal(planned.length, 46)
+    assert.deepEqual(
+      planned.slice(0, 3).map((s) => s.delayMs),
+      [1000, 61_000, 121_000],
+    )
+  })
+
+  it('keeps the pause when slots free faster than it', () => {
+    const now = input().now.getTime()
+    const planned = sends({
+      sentByCampaign: 46,
+      campaignFreesAt: Array.from({ length: 46 }, () => now),
+    })
+
+    assert.deepEqual(gapsOf(planned.slice(0, 3)), [3000, 3000])
+  })
+
+  it('stops at the pace when nothing leaves the window', () => {
+    const now = input().now.getTime()
+    // Lowered from 46 to 40 after sending 46: seven must leave before one goes.
+    const frees = Array.from({ length: 6 }, (_, i) => now + i * 1000)
+
+    assert.deepEqual(
+      planDay(input({ mailsPerDay: 40, sentByCampaign: 46, campaignFreesAt: frees })),
+      { kind: 'campaign_quota_reached' },
+    )
+  })
+
   it('takes the oldest contacts first', () => {
     assert.deepEqual(
       sends({ mailsPerDay: 3 }).map((s) => s.contactId),

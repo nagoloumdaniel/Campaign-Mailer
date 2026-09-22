@@ -8,6 +8,7 @@ import {
   DISPATCH_JOB,
   QUEUE_PREFIX,
   SEND_JOB,
+  WAKE_CHANNEL,
   sendJobId,
 } from './connection.js'
 
@@ -52,6 +53,9 @@ export function createQueues(connection: Redis) {
 
     async requestDispatch(campaignId: string): Promise<void> {
       await queue.add(DISPATCH_JOB, { campaignId })
+      // Best effort: the job is already queued, and the worker's own check
+      // finds it within two minutes if this ring goes unheard.
+      await connection.publish(WAKE_CHANNEL, campaignId).catch(() => 0)
     },
 
     async close(): Promise<void> {

@@ -46,6 +46,17 @@ export const DISPATCH_JOB = 'dispatch'
 /** Sends one contact its message. */
 export const SEND_JOB = 'send'
 
+/**
+ * The channel the API rings when a user starts or resumes a campaign.
+ *
+ * The worker sleeps while nothing is due (idleSleep.ts) and looks again every
+ * two minutes. A campaign launched at 11:00 would otherwise wait up to that long
+ * for its first message. A subscribed connection costs no command while it
+ * waits, so the ring is one PUBLISH per launch; if it is ever lost, the
+ * two-minute check still catches the job.
+ */
+export const WAKE_CHANNEL = 'cm:wake'
+
 /** BullMQ refuses a custom job id containing a colon. */
 export function sendJobId(contactId: string): string {
   return `send-${contactId}`

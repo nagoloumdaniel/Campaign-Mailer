@@ -1,7 +1,16 @@
 import type { Pool } from 'pg'
 
-import { LAST_SEND_HOUR, localHour, planDay, type PlanOutcome } from './planner.js'
+import { atLocalHour } from './campaignStats.js'
+import {
+  FREED_SLOT_MARGIN_MS,
+  LAST_SEND_HOUR,
+  localHour,
+  planDay,
+  type PlanOutcome,
+} from './planner.js'
 import { CLAIM_TIMEOUT, completeIfDone, countSentToday } from './sendEngine.js'
+
+const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
  * Turns a campaign's state into send jobs.
@@ -28,8 +37,17 @@ export interface DispatchDeps {
   random?: (() => number) | undefined
 }
 
-export type DispatchOutcome =
+export type DispatchOutcome = (
   PlanOutcome | { kind: 'not_dispatchable' } | { kind: 'completed' }
+) & {
+  /**
+   * When planning this campaign again will find something to send: the start
+   * hour, the next morning, or the moment the account's window frees. The
+   * worker plans again at that instant rather than at its next quarter-hour,
+   * which is what puts the first message out at 10:00 rather than at 10:13.
+   */
+  retryAt?: Date
+}
 
 interface DispatchRow {
   id: string
@@ -72,17 +90,22 @@ export async function dispatchCampaign(
 
   const hour = localHour(now, campaign.timezone)
 
+  // The start hour today, and tomorrow's, on the campaign's own clock.
+  const opensToday = () => atLocalHour(now, campaign.timezone, campaign.start_hour)
+  const opensTomorrow = () =>
+    atLocalHour(new Date(now.getTime() + DAY_MS), campaign.timezone, campaign.start_hour)
+
   if (hour < campaign.start_hour) {
     // A scheduled campaign waits for its first morning in the user's zone; a
     // running one waits for the next.
-    return { kind: 'before_start_hour' }
+    return { kind: 'before_start_hour', retryAt: opensToday() }
   }
 
   // Checked before the campaign is moved to running, so a campaign launched at
   // half past six in the evening still reads as "programmée" until it actually
   // has something to send the next morning.
   if (hour > LAST_SEND_HOUR) {
-    return { kind: 'after_send_window' }
+    return { kind: 'after_send_window', retryAt: opensTomorrow() }
   }
 
   if (campaign.status === 'scheduled') {
@@ -118,10 +141,14 @@ export async function dispatchCampaign(
       : { kind: 'nothing_pending' }
   }
 
-  const sentByCampaign = await pool.query<{ total: string }>(
-    `SELECT count(*)::text AS total FROM logs
+  // The sends themselves rather than their count: each one frees a slot of the
+  // day's pace 24 hours after it went out, and the plan queues the next send
+  // for that second. At most a day's pace of rows, 450 at the very most.
+  const inWindow = await pool.query<{ created_at: Date }>(
+    `SELECT created_at FROM logs
      WHERE campaign_id = $1 AND event_type = 'sent'
-       AND created_at >= now() - interval '24 hours'`,
+       AND created_at >= now() - interval '24 hours'
+     ORDER BY created_at`,
     [campaign.id],
   )
 
@@ -131,7 +158,8 @@ export async function dispatchCampaign(
     startHour: campaign.start_hour,
     mailsPerDay: campaign.mails_per_day,
     pauseMs: campaign.pause_ms,
-    sentByCampaign: Number(sentByCampaign.rows[0]?.total ?? 0),
+    sentByCampaign: inWindow.rows.length,
+    campaignFreesAt: inWindow.rows.map((row) => row.created_at.getTime() + DAY_MS),
     sentByAccount: await countSentToday(pool, campaign.user_id),
     accountLimit: deps.accountLimit,
     pendingContactIds: pending.rows.map((row) => row.id),
@@ -139,13 +167,73 @@ export async function dispatchCampaign(
   })
 
   if (outcome.kind === 'planned') {
+    const planned: { contactId: string; at: Date }[] = []
+
     for (const send of outcome.sends) {
       await deps.enqueueSend(
         { contactId: send.contactId, campaignId: campaign.id, userId: campaign.user_id },
         send.delayMs,
       )
+      planned.push({
+        contactId: send.contactId,
+        at: new Date(now.getTime() + send.delayMs),
+      })
     }
+
+    await recordPlannedTimes(pool, planned)
+    return outcome
+  }
+
+  if (outcome.kind === 'after_send_window') {
+    return { ...outcome, retryAt: opensTomorrow() }
+  }
+
+  if (outcome.kind === 'account_quota_reached') {
+    const frees = await accountWindowFreesAt(pool, campaign.user_id)
+    return frees ? { ...outcome, retryAt: frees } : outcome
   }
 
   return outcome
+}
+
+/**
+ * Writes down when each queued send is due, so the interface can count down to
+ * the real second rather than to an estimate.
+ *
+ * Only over a time that has passed or was never set: a contact planned again
+ * while its job already waits in the queue keeps the job's time, because the
+ * queue refuses the second job and the first one is what will run.
+ */
+async function recordPlannedTimes(
+  pool: Pool,
+  planned: readonly { contactId: string; at: Date }[],
+): Promise<void> {
+  if (planned.length === 0) {
+    return
+  }
+
+  await pool.query(
+    `UPDATE contacts c SET planned_at = p.at
+     FROM unnest($1::uuid[], $2::timestamptz[]) AS p(id, at)
+     WHERE c.id = p.id
+       AND c.status = 'pending'
+       AND (c.planned_at IS NULL OR c.planned_at < now())`,
+    [planned.map((send) => send.contactId), planned.map((send) => send.at.toISOString())],
+  )
+}
+
+/** When the oldest send of the account's 24-hour window leaves it, or null. */
+async function accountWindowFreesAt(pool: Pool, userId: string): Promise<Date | null> {
+  const { rows } = await pool.query<{ oldest: Date | null }>(
+    `SELECT min(l.created_at) AS oldest
+     FROM logs l
+     JOIN campaigns c ON c.id = l.campaign_id
+     WHERE c.user_id = $1
+       AND l.event_type = 'sent'
+       AND l.created_at >= now() - interval '24 hours'`,
+    [userId],
+  )
+
+  const oldest = rows[0]?.oldest
+  return oldest ? new Date(oldest.getTime() + DAY_MS + FREED_SLOT_MARGIN_MS) : null
 }

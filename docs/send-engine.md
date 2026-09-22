@@ -30,13 +30,37 @@ always-on worker under the allowance.
 What does is sleep. The worker pauses whenever nothing is waiting, nothing is
 running and no delayed job falls due within two and a half minutes, and a check
 every two minutes wakes it. Asleep it measured 1 command a minute, about 43 000
-a month; a job queued while it slept started 89 seconds later. The
-fifteen-minute plan runs from a timer in the worker process rather than as a
-repeatable job, so it touches Redis only when it queues a send.
+a month; a job queued while it slept started 89 seconds later. The plan runs
+from a timer in the worker process rather than as a repeatable job, so it
+touches Redis only when it queues a send.
 
 Sleep costs latency and nothing else. A send due while the worker sleeps starts
 at most one check late, and the claim, the retries and the ceiling do not depend
-on when a job starts.
+on when a job starts. A delayed job is seen coming: the check looks two and a
+half minutes ahead, so a send planned for 10:00:00 finds the worker awake.
+
+## When the plan runs
+
+Until 22 September 2026 the plan ran every fifteen minutes from whenever the
+process started. A campaign due at 10:00 met a plan at 9:58, before its start
+hour, and the next one at 10:13; its first message left at 10:13. Each plan now
+says when planning again would find something to send (`retryAt` in
+`services/dispatch.ts`): the start hour, the next morning, the moment the
+account's 24-hour window frees. The worker plans again at the earliest of
+those, to the second (`jobs/planClock.ts`), and never waits longer than fifteen
+minutes whatever they say.
+
+The campaign's own daily pace is a rolling 24 hours, so yesterday's sends free
+their slots one by one. The planner is given the instant each one leaves the
+window and queues a send for it then, one second after, rather than finding the
+day spent at 10:00 and waiting for the next pass.
+
+Two more latencies were removed at the same time. A launch or a resume rings
+the `cm:wake` channel after queueing its dispatch, and the sleeping worker
+checks the queue at once instead of within two minutes; a subscribed
+connection costs no command while it waits. And the dispatcher writes each
+queued send's due time on its contact (`contacts.planned_at`), so the
+interface counts down to the real second rather than to an estimate.
 
 Planning and sending are separate because they fail differently. Planning is
 cheap, idempotent and can be repeated; sending is the irreversible act.

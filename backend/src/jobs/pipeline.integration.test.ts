@@ -378,9 +378,9 @@ describe(
       await drain(queue, engine(gmail.gateway, { dailyLimit: 20 }))
 
       assert.equal(gmail.delivered.length, 20)
-      assert.deepEqual(await plan(queue, { accountLimit: 20 }), {
-        kind: 'account_quota_reached',
-      })
+      const held = await plan(queue, { accountLimit: 20 })
+      assert.equal(held.kind, 'account_quota_reached')
+      assert.ok(held.retryAt, 'the plan should say when the window frees')
       assert.equal(queue.jobs.size, 0)
 
       assert.deepEqual(await statusCounts(), { sent: 20, pending: 10 })
@@ -502,8 +502,10 @@ describe(
       )
       const queue = new FakeQueue()
 
+      // The worker plans again at 14:00 exactly, not at its next quarter-hour.
       assert.deepEqual(await plan(queue, { now: new Date('2026-07-01T10:00:00Z') }), {
         kind: 'before_start_hour',
+        retryAt: new Date('2026-07-01T14:00:00Z'),
       })
       assert.equal((await campaignRow()).status, 'scheduled')
       assert.equal(queue.added, 0)
@@ -528,6 +530,7 @@ describe(
       // it is still only scheduled.
       assert.deepEqual(await plan(queue, { now: new Date('2026-07-01T18:30:00Z') }), {
         kind: 'after_send_window',
+        retryAt: new Date('2026-07-02T10:00:00Z'),
       })
       assert.equal((await campaignRow()).status, 'scheduled')
       assert.equal(queue.added, 0)
