@@ -49,11 +49,12 @@ export function Navbar() {
 
   return (
     <header className="sticky top-0 z-40 px-3 pt-3 sm:px-5 sm:pt-4">
-      {/* Three columns, the outer two of equal width, so the destinations sit
-          on the true centre of the bar whatever the logo and the account menu
-          measure, on a phone as on a desktop. */}
+      {/* The destinations are placed on the bar's exact centre, independently
+          of the logo on the left and the account controls on the right. A
+          three-column grid did not hold on a phone: the right column's minimum
+          width, wider than the left's, pulled the links off centre. */}
       <div
-        className={`mx-auto grid h-14 max-w-6xl grid-cols-[1fr_auto_1fr] items-center gap-1.5 rounded-2xl glass px-2 transition-[box-shadow,border-color] duration-300 ease-out sm:gap-3 sm:px-3.5 ${
+        className={`relative mx-auto flex h-14 max-w-6xl items-center justify-between gap-1.5 rounded-2xl glass px-2 transition-[box-shadow,border-color] duration-300 ease-out sm:gap-3 sm:px-3.5 ${
           scrolled
             ? 'border border-border shadow-card'
             : 'border border-transparent shadow-none'
@@ -61,7 +62,7 @@ export function Navbar() {
       >
         <Link
           to="/"
-          className="flex min-w-0 items-center gap-2 justify-self-start rounded-lg pr-1 pl-1 text-ink"
+          className="flex min-w-0 items-center gap-2 rounded-lg pr-1 pl-1 text-ink"
           aria-label="Campaign Mailer, accueil"
         >
           <Logo size={26} />
@@ -72,7 +73,10 @@ export function Navbar() {
           </span>
         </Link>
 
-        <nav aria-label="Navigation principale" className="min-w-0">
+        <nav
+          aria-label="Navigation principale"
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+        >
           <ul className="flex items-center justify-center gap-0.5 sm:gap-1">
             {NAV.map((item) => (
               <li key={item.to}>
@@ -82,7 +86,7 @@ export function Navbar() {
           </ul>
         </nav>
 
-        <div className="flex shrink-0 items-center gap-1 justify-self-end sm:gap-1.5">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
           <ThemeToggle />
           <UserMenu />
         </div>
@@ -120,7 +124,7 @@ function NavItem({
         end={end}
         aria-label={label}
         className={({ isActive }) =>
-          `relative flex h-9 press items-center gap-2 rounded-xl px-2.5 text-[13px] font-medium md:px-3 ${
+          `relative flex h-9 press items-center gap-2 rounded-xl px-2 text-[13px] font-medium sm:px-2.5 md:px-3 ${
             isActive
               ? 'bg-accent-soft text-accent'
               : 'text-ink-muted hover:bg-surface-2 hover:text-ink'
