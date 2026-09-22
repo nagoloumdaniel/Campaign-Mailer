@@ -7,14 +7,21 @@ import { Icon } from '@/components/ui/Icon'
 import { StackedProgress } from '@/components/ui/Progress'
 import {
   campaignsApi,
+  fitsInOneDay,
   isEditable,
   remainingOf,
   type Campaign,
 } from '@/services/campaigns'
-import { countOf, formatDate, formatNumber, formatPercent } from '@/services/format'
-import { formatNextSend } from '@/services/time'
+import {
+  countOf,
+  formatDate,
+  formatHour,
+  formatNumber,
+  formatPercent,
+} from '@/services/format'
 
 import { StatusBadge, TypeBadge } from './CampaignBadges'
+import { NextSendCountdown } from './NextSendCountdown'
 
 /**
  * One campaign, in a list.
@@ -30,12 +37,18 @@ import { StatusBadge, TypeBadge } from './CampaignBadges'
 export function CampaignCard({
   campaign,
   nextSendAt,
+  lastSentAt,
+  onDue,
   onDelete,
   index = 0,
 }: {
   campaign: Campaign
   /** From the dashboard, which already knows it; absent in the plain list. */
   nextSendAt?: string | null | undefined
+  /** Where the countdown to `nextSendAt` starts. */
+  lastSentAt?: string | null | undefined
+  /** The countdown reached zero. */
+  onDue?: (() => void) | undefined
   onDelete?: ((campaign: Campaign) => void) | undefined
   index?: number
 }) {
@@ -155,18 +168,29 @@ export function CampaignCard({
           </div>
         )}
 
-        <p className="mt-3.5 flex items-center gap-1.5 text-xs text-ink-muted">
-          <Icon name={finished ? 'check-circle' : 'clock'} size={13} />
-          {finished
-            ? campaign.completedAt
-              ? `Terminée le ${formatDate(campaign.completedAt)}`
-              : 'Terminée'
-            : nextSendAt
-              ? `Prochain envoi ${formatNextSend(new Date(nextSendAt))}`
+        {nextSendAt && !finished ? (
+          <NextSendCountdown
+            key={nextSendAt}
+            at={nextSendAt}
+            from={lastSentAt}
+            onDue={onDue}
+            compact
+            className="mt-3.5 border-t border-border pt-3"
+          />
+        ) : (
+          <p className="mt-3.5 flex items-center gap-1.5 text-xs text-ink-muted">
+            <Icon name={finished ? 'check-circle' : 'clock'} size={13} />
+            {finished
+              ? campaign.completedAt
+                ? `Terminée le ${formatDate(campaign.completedAt)}`
+                : 'Terminée'
               : campaign.status === 'draft'
                 ? `Créée le ${formatDate(campaign.createdAt)}`
-                : `${countOf(campaign.mailsPerDay, 'envoi')} par jour à partir de ${String(campaign.startHour).padStart(2, '0')}:00`}
-        </p>
+                : fitsInOneDay(campaign)
+                  ? `Envois à partir de ${formatHour(campaign.startHour)}`
+                  : `${countOf(campaign.mailsPerDay, 'envoi')} par jour à partir de ${formatHour(campaign.startHour)}`}
+          </p>
+        )}
       </div>
     </Card>
   )

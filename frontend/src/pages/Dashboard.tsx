@@ -239,7 +239,11 @@ export function Dashboard() {
 
           <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
             <QuotaCard account={dashboard.account} plannedToday={plannedToday} />
-            <UpcomingSends upcoming={dashboard.upcoming} campaigns={campaigns} />
+            <UpcomingSends
+              upcoming={dashboard.upcoming}
+              campaigns={campaigns}
+              onDue={() => void refresh()}
+            />
           </div>
 
           {advice && (
@@ -275,18 +279,23 @@ export function Dashboard() {
                 description="Programmées, en cours d’envoi ou en pause."
               />
               <ul className="mt-3 space-y-3">
-                {groups.active.map((campaign, index) => (
-                  <CampaignCard
-                    key={campaign.id}
-                    campaign={campaign}
-                    index={Math.min(index, 8)}
-                    nextSendAt={
-                      dashboard.upcoming.find((item) => item.campaignId === campaign.id)
-                        ?.nextSendAt
-                    }
-                    onDelete={setToDelete}
-                  />
-                ))}
+                {groups.active.map((campaign, index) => {
+                  const upcoming = dashboard.upcoming.find(
+                    (item) => item.campaignId === campaign.id,
+                  )
+
+                  return (
+                    <CampaignCard
+                      key={campaign.id}
+                      campaign={campaign}
+                      index={Math.min(index, 8)}
+                      nextSendAt={upcoming?.nextSendAt}
+                      lastSentAt={upcoming?.lastSentAt}
+                      onDue={() => void refresh()}
+                      onDelete={setToDelete}
+                    />
+                  )
+                })}
               </ul>
             </section>
           )}

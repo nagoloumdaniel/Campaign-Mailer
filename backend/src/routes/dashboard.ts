@@ -79,6 +79,7 @@ export function createDashboardRouter({
             sentLast24h: window.sentLast24h,
             oldestSendInWindowAt: window.oldestInWindowAt,
             lastSentAt: window.lastSentAt,
+            nextPlannedAt: window.nextPlannedAt,
           })
 
           return {
@@ -86,6 +87,8 @@ export function createDashboardRouter({
             name: row.name,
             status: row.status,
             pending: counts.pending,
+            // Where the countdown to the next send starts from.
+            lastSentAt: window.lastSentAt?.toISOString() ?? null,
             nextSendAt: schedule.nextSendAt,
             estimatedEndAt: schedule.estimatedEndAt,
           }

@@ -256,6 +256,21 @@ export function remainingOf(
 }
 
 /**
+ * True when everything left to send fits under the campaign's daily pace.
+ *
+ * Then the pace never holds anything back, and a panel about "46 e-mails par
+ * jour" describes a limit the campaign will not meet: the interface leaves it
+ * out. It comes back by itself the moment an import makes the list longer than
+ * a day. The account's own 450 ceiling still applies, and is still enforced by
+ * the server whatever this says.
+ */
+export function fitsInOneDay(
+  campaign: Pick<Campaign, 'totalContacts' | 'sentCount' | 'errorCount' | 'mailsPerDay'>,
+): boolean {
+  return remainingOf(campaign) <= campaign.mailsPerDay
+}
+
+/**
  * Office hours, on the campaign's own clock. Mirrors FIRST_SEND_HOUR and
  * LAST_SEND_HOUR on the server: nothing goes out before 10:00 or after 17:59,
  * and a campaign launched after the window starts the next morning.

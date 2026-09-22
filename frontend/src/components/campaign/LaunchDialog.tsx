@@ -6,6 +6,7 @@ import {
   LAST_SEND_HOUR,
   SEND_WINDOW_LABEL,
   estimateSchedule,
+  fitsInOneDay,
   remainingOf,
   type Campaign,
 } from '@/services/campaigns'
@@ -85,7 +86,9 @@ export function LaunchDialog({
           {startingSentence(campaign)}
         </Row>
 
-        {schedule && (
+        {/* A list that fits in one day has no pace to speak of: it all goes
+            out in one sitting. */}
+        {schedule && !fitsInOneDay(campaign) && (
           <Row label="Durée estimée" icon="calendar">
             {formatDays(schedule.days)}, environ {formatNumber(campaign.mailsPerDay)} par
             jour · fin vers le {formatDate(schedule.lastDay)}

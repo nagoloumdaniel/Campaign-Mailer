@@ -6,6 +6,8 @@ export interface UpcomingSend {
   name: string
   status: CampaignStatus
   pending: number
+  /** ISO instant of the campaign's last send: where the countdown starts from. */
+  lastSentAt: string | null
   /** ISO instant, or null when nobody is left to send to. */
   nextSendAt: string | null
   estimatedEndAt: string | null

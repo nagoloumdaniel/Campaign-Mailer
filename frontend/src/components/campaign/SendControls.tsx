@@ -9,6 +9,7 @@ import { ApiError } from '@/services/api'
 import {
   SEND_WINDOW_LABEL,
   campaignsApi,
+  fitsInOneDay,
   remainingOf,
   type Campaign,
 } from '@/services/campaigns'
@@ -231,7 +232,9 @@ function statusSentence(campaign: Campaign): string {
     case 'scheduled':
       return `Programmée : les envois commencent à ${hour}, heure de ${campaign.timezone.replace(/_/g, ' ')}, dans la plage ${SEND_WINDOW_LABEL}.`
     case 'running':
-      return `En cours : ${countOf(campaign.mailsPerDay, 'message')} par jour au maximum, un par un.`
+      return fitsInOneDay(campaign)
+        ? `En cours : les messages partent un par un, dans la plage ${SEND_WINDOW_LABEL}.`
+        : `En cours : ${countOf(campaign.mailsPerDay, 'message')} par jour au maximum, un par un.`
     case 'paused':
       // The API does not say who paused it. If it was not the user, an expired
       // Google authorization is by far the likeliest reason, and saying so

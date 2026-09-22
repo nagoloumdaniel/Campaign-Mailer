@@ -9,6 +9,7 @@ import { Icon } from '@/components/ui/Icon'
 import { Skeleton } from '@/components/ui/Skeleton'
 import {
   campaignsApi,
+  fitsInOneDay,
   type Campaign,
   type CampaignStats as Stats,
 } from '@/services/campaigns'
@@ -19,6 +20,8 @@ import {
   formatPercent,
 } from '@/services/format'
 import { formatNextSend } from '@/services/time'
+
+import { NextSendCountdown } from './NextSendCountdown'
 
 /**
  * Where a campaign stands, in three readings of the same data.
@@ -101,12 +104,22 @@ export function CampaignStats({ campaign }: { campaign: Campaign }) {
         />
       )}
 
-      {load.state === 'ready' && <Body campaign={campaign} stats={load.stats} />}
+      {load.state === 'ready' && (
+        <Body campaign={campaign} stats={load.stats} onDue={() => void refresh()} />
+      )}
     </Card>
   )
 }
 
-function Body({ campaign, stats }: { campaign: Campaign; stats: Stats }) {
+function Body({
+  campaign,
+  stats,
+  onDue,
+}: {
+  campaign: Campaign
+  stats: Stats
+  onDue: () => void
+}) {
   const attempted = stats.sent + stats.failed
   const successRate = attempted > 0 ? stats.sent / attempted : null
   const finished = campaign.status === 'completed'
@@ -124,6 +137,17 @@ function Body({ campaign, stats }: { campaign: Campaign; stats: Stats }) {
 
   return (
     <>
+      {stats.nextSendAt && (
+        <NextSendCountdown
+          // Keyed on the instant, so each new send starts a fresh bar.
+          key={stats.nextSendAt}
+          at={stats.nextSendAt}
+          from={stats.lastSentAt}
+          onDue={onDue}
+          className="mt-5 rounded-xl border border-border bg-surface-2 px-4 py-3.5"
+        />
+      )}
+
       <div className="mt-5 grid gap-6 lg:grid-cols-[auto_minmax(0,1fr)]">
         <Donut
           total={stats.total}
@@ -161,19 +185,18 @@ function Body({ campaign, stats }: { campaign: Campaign; stats: Stats }) {
               stats.failed > 0 ? `${formatNumber(stats.failed)} en erreur` : undefined
             }
           />
-          <Figure
-            label="Rythme"
-            value={formatNumber(campaign.mailsPerDay)}
-            detail="e-mails par jour"
-          />
+          {/* The pace only says something when the list outlasts a day. */}
+          {!fitsInOneDay(campaign) && (
+            <Figure
+              label="Rythme"
+              value={formatNumber(campaign.mailsPerDay)}
+              detail="e-mails par jour"
+            />
+          )}
         </dl>
       </div>
 
       <dl className="mt-5 grid gap-x-6 gap-y-2 border-t border-border pt-4 text-[13px] sm:grid-cols-2">
-        <Line icon="clock" label="Prochain envoi">
-          {stats.nextSendAt ? formatNextSend(new Date(stats.nextSendAt)) : 'Aucun'}
-        </Line>
-
         <Line icon="calendar" label={finished ? 'Durée' : 'Fin estimée'}>
           {finished
             ? duration === null

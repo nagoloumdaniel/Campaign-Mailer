@@ -65,3 +65,25 @@ const DAY_AND_HOUR = new Intl.DateTimeFormat('fr-FR', {
 export function formatSendDay(at: Date, now: Date = new Date()): string {
   return sameDay(at, now) ? TIME.format(at) : DAY_AND_HOUR.format(at)
 }
+
+const pad = (value: number) => String(value).padStart(2, '0')
+
+/**
+ * A countdown: "04:07" under an hour, "2 h 05" under a day, "1 j 3 h" beyond.
+ * Seconds only where they still move the reading.
+ */
+export function formatLeft(ms: number): string {
+  const seconds = Math.max(0, Math.ceil(ms / 1000))
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+
+  if (hours >= 24) {
+    return `${String(Math.floor(hours / 24))} j ${String(hours % 24)} h`
+  }
+
+  if (hours >= 1) {
+    return `${String(hours)} h ${pad(minutes % 60)}`
+  }
+
+  return `${pad(minutes)}:${pad(seconds % 60)}`
+}

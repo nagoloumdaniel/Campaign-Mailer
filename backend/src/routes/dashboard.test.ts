@@ -74,6 +74,7 @@ const stats: StatsRepository = {
       lastSentAt: new Date(
         id === 'late' ? '2026-07-01T09:59:59Z' : '2026-07-01T09:00:00Z',
       ),
+      nextPlannedAt: null,
     }),
   sendsPerDay: () => Promise.resolve([]),
   accountSendsPerDay: (_userId, timezone) => {

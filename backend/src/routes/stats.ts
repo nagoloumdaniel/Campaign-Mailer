@@ -51,6 +51,7 @@ export function createStatsRouter({ campaigns, stats, now }: StatsRouterDeps): R
         sentLast24h: window.sentLast24h,
         oldestSendInWindowAt: window.oldestInWindowAt,
         lastSentAt: window.lastSentAt,
+        nextPlannedAt: window.nextPlannedAt,
       })
 
       const processed = counts.sent + counts.failed

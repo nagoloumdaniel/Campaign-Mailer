@@ -29,6 +29,12 @@ export interface ScheduleInput {
   /** The oldest of those sends: the window frees 24 hours after it. */
   oldestSendInWindowAt: Date | null
   lastSentAt: Date | null
+  /**
+   * The earliest send already queued, as the planner wrote it. When there is
+   * one it is the answer, to the second; the rules below are only for a
+   * campaign the planner has not reached yet.
+   */
+  nextPlannedAt?: Date | null | undefined
 }
 
 export interface ScheduleEstimate {
@@ -164,7 +170,7 @@ export function estimateSchedule(input: ScheduleInput): ScheduleEstimate {
     return { nextSendAt: null, estimatedEndAt: null }
   }
 
-  const next = nextSendAt(input)
+  const next = input.nextPlannedAt ?? nextSendAt(input)
   const gap = input.pauseMs * AVERAGE_GAP_FACTOR
   const leftToday = input.mailsPerDay - input.sentLast24h
   const firstBatch = Math.min(

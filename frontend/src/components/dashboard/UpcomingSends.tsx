@@ -6,9 +6,9 @@ import { Icon } from '@/components/ui/Icon'
 import type { Campaign } from '@/services/campaigns'
 import { formatNumber } from '@/services/format'
 import type { UpcomingSend } from '@/services/dashboard'
-import { formatNextSend, formatSendDay } from '@/services/time'
 
 import { StatusBadge } from '../campaign/CampaignBadges'
+import { NextSendCountdown } from '../campaign/NextSendCountdown'
 
 /**
  * What goes out next, soonest first.
@@ -18,18 +18,20 @@ import { StatusBadge } from '../campaign/CampaignBadges'
  * checking the dashboard in the morning is looking for the next thing, not
  * for a directory of campaigns.
  *
- * "dans 12 min" and the day it falls on are both there. The first is what a
- * person wants at a glance; the second is what they need when the answer is
- * "demain", because a relative time alone stops being useful past a few
- * hours.
+ * Each row counts down to its next send, second by second, with the hour it
+ * falls on beside it: the countdown is what a person wants at a glance, the
+ * hour is what they act on when the answer is "demain".
  */
 export function UpcomingSends({
   upcoming,
   campaigns,
+  onDue,
 }: {
   upcoming: UpcomingSend[]
   /** Looked up for the day's pace, which the dashboard payload does not carry. */
   campaigns: Campaign[]
+  /** A countdown reached zero: the dashboard reads the account again. */
+  onDue?: (() => void) | undefined
 }) {
   return (
     <Card as="section" aria-labelledby="upcoming-heading" className="flex flex-col p-5">
@@ -77,19 +79,24 @@ export function UpcomingSends({
 
                     <span className="mt-0.5 block text-xs text-ink-muted">
                       {formatNumber(item.pending)} en attente
-                      {campaign && ` · ${formatNumber(campaign.mailsPerDay)} par jour`}
+                      {/* The day's pace only matters when the list outlasts a day. */}
+                      {campaign &&
+                        item.pending > campaign.mailsPerDay &&
+                        ` · ${formatNumber(campaign.mailsPerDay)} par jour`}
                     </span>
-                  </span>
 
-                  <span className="shrink-0 text-right">
-                    <span className="block text-[13px] font-medium whitespace-nowrap">
-                      {item.nextSendAt
-                        ? formatNextSend(new Date(item.nextSendAt))
-                        : 'Rien à envoyer'}
-                    </span>
-                    {item.nextSendAt && (
-                      <span className="tabular mt-0.5 block text-xs whitespace-nowrap text-ink-subtle">
-                        {formatSendDay(new Date(item.nextSendAt))}
+                    {item.nextSendAt ? (
+                      <NextSendCountdown
+                        key={item.nextSendAt}
+                        at={item.nextSendAt}
+                        from={item.lastSentAt}
+                        onDue={onDue}
+                        compact
+                        className="mt-2"
+                      />
+                    ) : (
+                      <span className="mt-1 block text-xs text-ink-subtle">
+                        Rien à envoyer
                       </span>
                     )}
                   </span>

@@ -12,6 +12,7 @@ import {
   LAST_SEND_HOUR,
   SEND_WINDOW_LABEL,
   campaignsApi,
+  fitsInOneDay,
   remainingOf,
   type Campaign,
 } from '@/services/campaigns'
@@ -77,6 +78,13 @@ export function CadencePanel({
   const [pauseSeconds, setPauseSeconds] = useState(Math.round(campaign.pauseMs / 1000))
   const [timezone, setTimezone] = useState(campaign.timezone)
   const [saving, setSaving] = useState(false)
+  /**
+   * A list that fits under the daily pace goes out in one day, and the pace
+   * fields describe a limit it will never meet: they stay folded until the
+   * user asks to spread the list out on purpose.
+   */
+  const [spreadAsked, setSpreadAsked] = useState(false)
+  const paced = !fitsInOneDay(campaign) || spreadAsked
 
   const zones = useMemo(() => {
     const list = timeZones()
@@ -134,28 +142,30 @@ export function CadencePanel({
     <Card as="section" aria-labelledby="cadence-heading" className="p-5">
       <CardHeader
         id="cadence-heading"
-        title="Rythme d’envoi"
+        title={paced ? 'Rythme d’envoi' : 'Horaires d’envoi'}
         description="Les messages partent un par un, pendant les heures de bureau du fuseau choisi."
       />
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <TextField
-          label="E-mails par jour"
-          type="number"
-          min={1}
-          max={MAX_PER_DAY}
-          value={mailsPerDay}
-          disabled={disabled}
-          onChange={(event) => {
-            setMailsPerDay(Number(event.target.value))
-          }}
-          hint={`max ${String(MAX_PER_DAY)}`}
-          {...(tooMany
-            ? {
-                error: `Entre 1 et ${String(MAX_PER_DAY)}. Gmail bloque un compte personnel au-delà de 500 envois sur 24 heures.`,
-              }
-            : {})}
-        />
+        {paced && (
+          <TextField
+            label="E-mails par jour"
+            type="number"
+            min={1}
+            max={MAX_PER_DAY}
+            value={mailsPerDay}
+            disabled={disabled}
+            onChange={(event) => {
+              setMailsPerDay(Number(event.target.value))
+            }}
+            hint={`max ${String(MAX_PER_DAY)}`}
+            {...(tooMany
+              ? {
+                  error: `Entre 1 et ${String(MAX_PER_DAY)}. Gmail bloque un compte personnel au-delà de 500 envois sur 24 heures.`,
+                }
+              : {})}
+          />
+        )}
 
         <Select
           value={String(startHour)}
@@ -203,7 +213,28 @@ export function CadencePanel({
           commence le lendemain à {formatHour(startHour)} — rien ne part le soir même.
         </Note>
 
-        {days !== null && (
+        {!paced && remaining > 0 && (
+          <Note icon="calendar">
+            Les {countOf(remaining, 'envoi')} restants tiennent dans une seule journée,
+            environ {formatNumber(minutesPerDay)} minutes d’envoi.
+            {!disabled && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSpreadAsked(true)
+                  }}
+                  className="font-medium text-accent underline-offset-2 hover:underline"
+                >
+                  Répartir sur plusieurs jours
+                </button>
+              </>
+            )}
+          </Note>
+        )}
+
+        {paced && days !== null && (
           <Note icon="calendar">
             À ce rythme, les {countOf(remaining, 'envoi')} restants prendront environ{' '}
             <strong className="font-semibold text-ink">{formatDays(days)}</strong>, à
@@ -218,11 +249,13 @@ export function CadencePanel({
           </Note>
         )}
 
-        <Note icon="gauge">
-          Le compte est plafonné à {formatNumber(MAX_PER_DAY)} e-mails sur 24 heures,
-          toutes campagnes confondues. Une fois atteint, l’envoi attend que la fenêtre se
-          libère puis reprend seul.
-        </Note>
+        {paced && (
+          <Note icon="gauge">
+            Le compte est plafonné à {formatNumber(MAX_PER_DAY)} e-mails sur 24 heures,
+            toutes campagnes confondues. Une fois atteint, l’envoi attend que la fenêtre
+            se libère puis reprend seul.
+          </Note>
+        )}
       </ul>
 
       {!disabled && (

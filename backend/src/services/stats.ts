@@ -21,6 +21,8 @@ export interface SendWindow {
   sentLast24h: number
   oldestInWindowAt: Date | null
   lastSentAt: Date | null
+  /** The earliest send already queued and still ahead, as the planner wrote it. */
+  nextPlannedAt: Date | null
 }
 
 export interface DaySends {
@@ -90,12 +92,18 @@ export function createStatsRepository(pool: Pool): StatsRepository {
         sent_last_24h: number
         oldest_in_window: Date | null
         last_sent_at: Date | null
+        next_planned_at: Date | null
       }>(
+        // A planned time a few seconds past is kept: the job is being sent at
+        // that very moment, and dropping it would flash the estimate instead.
         `SELECT count(*) FILTER (WHERE created_at >= now() - interval '24 hours')::int
                   AS sent_last_24h,
                 min(created_at) FILTER (WHERE created_at >= now() - interval '24 hours')
                   AS oldest_in_window,
-                max(created_at) AS last_sent_at
+                max(created_at) AS last_sent_at,
+                (SELECT min(planned_at) FROM contacts
+                 WHERE campaign_id = $1 AND status = 'pending'
+                   AND planned_at >= now() - interval '10 seconds') AS next_planned_at
          FROM logs
          WHERE campaign_id = $1 AND event_type = 'sent'`,
         [campaignId],
@@ -107,6 +115,7 @@ export function createStatsRepository(pool: Pool): StatsRepository {
         sentLast24h: row?.sent_last_24h ?? 0,
         oldestInWindowAt: row?.oldest_in_window ?? null,
         lastSentAt: row?.last_sent_at ?? null,
+        nextPlannedAt: row?.next_planned_at ?? null,
       }
     },
 

@@ -97,6 +97,7 @@ beforeEach(() => {
     sentLast24h: 6,
     oldestInWindowAt: new Date('2026-07-01T07:00:00Z'),
     lastSentAt: new Date('2026-07-01T09:59:50Z'),
+    nextPlannedAt: null,
   }
   signedInAs = ALICE
   askedZone = null
@@ -164,6 +165,13 @@ describe('GET /campaigns/:id/stats', () => {
     assert.equal(body.stats.nextSendAt, '2026-07-01T10:00:20.000Z')
     assert.ok(body.stats.estimatedEndAt)
     assert.ok(body.stats.estimatedEndAt > body.stats.nextSendAt)
+  })
+
+  it('gives the queued send’s own time once the planner has written it', async () => {
+    // The jitter put it at 10:00:23, not at the 10:00:20 the rules predict.
+    window = { ...window, nextPlannedAt: new Date('2026-07-01T10:00:23Z') }
+
+    assert.equal((await get()).body.stats.nextSendAt, '2026-07-01T10:00:23.000Z')
   })
 
   it('estimates nothing for a campaign that is not sending', async () => {
