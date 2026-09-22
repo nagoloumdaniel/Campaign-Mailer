@@ -95,7 +95,7 @@ export function CampaignEditor() {
   const [load, setLoad] = useState<Load>({ state: 'loading' })
   const [draft, setDraft] = useState<Draft>({ subject: '', bodyHtml: '', bodyText: '' })
   const [variables, setVariables] = useState<string[]>([])
-  const [firstContact, setFirstContact] = useState<Contact | null>(null)
+  const [previewContacts, setPreviewContacts] = useState<Contact[]>([])
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -148,11 +148,13 @@ export function CampaignEditor() {
   }, [])
 
   /**
-   * The contact the preview renders against: the first one imported.
+   * The contacts the preview renders against: the first ten imported.
    *
-   * Reloaded whenever the contact list changes, so the very first import
-   * replaces the sample values without a page reload — which is the moment a
-   * mis-mapped CSV column becomes visible.
+   * Ten rather than one, so the preview can step through them: a merge that
+   * reads right on the first row can still break on the third. Reloaded
+   * whenever the contact list changes, so the very first import replaces the
+   * sample values without a page reload — which is the moment a mis-mapped CSV
+   * column becomes visible.
    */
   useEffect(() => {
     if (!id) {
@@ -161,12 +163,12 @@ export function CampaignEditor() {
 
     // oxlint-disable-next-line react/set-state-in-effect
     void contactsApi
-      .list(id, { limit: 1, offset: 0 })
+      .list(id, { limit: 10, offset: 0 })
       .then((result) => {
-        setFirstContact(result.contacts[0] ?? null)
+        setPreviewContacts(result.contacts)
       })
       .catch(() => {
-        setFirstContact(null)
+        setPreviewContacts([])
       })
   }, [id, contactsVersion])
 
@@ -488,7 +490,7 @@ export function CampaignEditor() {
             subject={draft.subject}
             bodyHtml={draft.bodyHtml}
             senderEmail={user?.email ?? 'vous@gmail.com'}
-            contact={firstContact}
+            contacts={previewContacts}
             attachments={campaign.attachments ?? []}
           />
         </div>

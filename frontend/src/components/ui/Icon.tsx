@@ -27,6 +27,7 @@ export type IconName =
   | 'sun'
   | 'moon'
   | 'monitor'
+  | 'smartphone'
   | 'mail'
   | 'clock'
   | 'calendar'
@@ -118,6 +119,13 @@ const PATHS = new Map<IconName, ReactNode>([
     <g key="p">
       <rect x="3" y="4.5" width="18" height="12" rx="2" />
       <path d="M8.5 20.5h7M12 16.5v4" />
+    </g>,
+  ],
+  [
+    'smartphone',
+    <g key="p">
+      <rect x="6.5" y="2.75" width="11" height="18.5" rx="2.25" />
+      <path d="M11 18h2" />
     </g>,
   ],
   [
