@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { PageHeader } from '@/components/layout/PageHeader'
+import { CampaignRecords } from '@/components/history/CampaignRecords'
+import { PageHeader, SectionHeader } from '@/components/layout/PageHeader'
 import { HistorySkeleton } from '@/components/skeletons/PageSkeletons'
 import { AnchorButton, Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -21,6 +22,7 @@ import {
   CAMPAIGN_TYPES,
   campaignTypeLabel,
   campaignsApi,
+  type Campaign,
   type CampaignType,
 } from '@/services/campaigns'
 import { countOf, formatDateTime, formatNumber } from '@/services/format'
@@ -66,6 +68,8 @@ export function History() {
   const [search, setSearch] = useState('')
   const [type, setType] = useState<TypeFilter>('all')
   const [outcome, setOutcome] = useState<OutcomeFilter>('all')
+  const [campaignId, setCampaignId] = useState<string | null>(null)
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [creating, setCreating] = useState(false)
 
@@ -74,8 +78,9 @@ export function History() {
       ...(search ? { search } : {}),
       ...(type === 'all' ? {} : { type }),
       ...(outcome === 'all' ? {} : { outcome }),
+      ...(campaignId ? { campaignId } : {}),
     }),
-    [search, type, outcome],
+    [search, type, outcome, campaignId],
   )
 
   const fetchPage = useCallback(async () => {
@@ -96,6 +101,18 @@ export function History() {
     // oxlint-disable-next-line react/set-state-in-effect
     void fetchPage()
   }, [fetchPage])
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    void campaignsApi
+      .list()
+      .then(setCampaigns)
+      .catch(() => {
+        setCampaigns([])
+      })
+  }, [])
+
+  const launched = campaigns.filter((campaign) => campaign.status !== 'draft')
 
   /**
    * Every filter goes back to the first page.
@@ -129,7 +146,8 @@ export function History() {
     })
   }
 
-  const filtering = search !== '' || type !== 'all' || outcome !== 'all'
+  const filtering =
+    search !== '' || type !== 'all' || outcome !== 'all' || campaignId !== null
   const empty = total === 0 && !filtering
 
   if (load.state === 'loading' && entries.length === 0) {
@@ -140,7 +158,7 @@ export function History() {
     <>
       <PageHeader
         title="Historique"
-        description="Tous les e-mails partis de votre compte, campagne par campagne."
+        description="Vos campagnes lancées et ce qu’elles ont donné, puis le détail de chaque envoi."
         action={
           total > 0 && (
             <AnchorButton
@@ -168,6 +186,26 @@ export function History() {
         />
       ) : (
         <>
+          <CampaignRecords
+            campaigns={campaigns}
+            selectedId={campaignId}
+            onSelect={(id) => {
+              refine(() => {
+                setCampaignId(id)
+              })
+              document
+                .getElementById('log-heading')
+                ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            }}
+          />
+
+          <SectionHeader
+            id="log-heading"
+            title="Journal des envois"
+            description="Chaque e-mail envoyé, avec son destinataire tel qu’il était au moment de l’envoi."
+            className="mt-8 mb-3 scroll-mt-24"
+          />
+
           {byType && (
             <SegmentedControl
               value={type}
@@ -209,6 +247,25 @@ export function History() {
             />
 
             <Select
+              value={campaignId ?? 'all'}
+              options={[
+                { value: 'all', label: 'Toutes les campagnes' },
+                ...launched.map((campaign) => ({
+                  value: campaign.id,
+                  label: campaign.name,
+                })),
+              ]}
+              onChange={(value) => {
+                refine(() => {
+                  setCampaignId(value === 'all' ? null : value)
+                })
+              }}
+              label="Filtrer par campagne"
+              labelHidden
+              className="w-56 max-sm:w-full"
+            />
+
+            <Select
               value={outcome}
               options={OUTCOME_OPTIONS}
               onChange={(value) => {
@@ -244,6 +301,7 @@ export function History() {
                       setSearch('')
                       setType('all')
                       setOutcome('all')
+                      setCampaignId(null)
                     })
                   }}
                 >
