@@ -32,9 +32,9 @@ type Load =
  * the quota it contradicts, because that is the only place where the
  * contradiction is visible.
  *
- * Finished campaigns are folded into a short list at the bottom rather than
- * mixed in with the live ones. They are a record, not a thing to steer, and
- * the full history has its own page.
+ * Finished campaigns are not repeated here (owner's request, 22 September
+ * 2026): the Campagnes page lists them and the history shows their results.
+ * The first figure still counts them.
  */
 export function Dashboard() {
   const [load, setLoad] = useState<Load>({ state: 'loading' })
@@ -317,44 +317,6 @@ export function Dashboard() {
                   />
                 ))}
               </ul>
-            </section>
-          )}
-
-          {groups.completed.length > 0 && (
-            <section aria-labelledby="completed-heading" className="mt-8">
-              <SectionHeader
-                id="completed-heading"
-                title="Campagnes terminées"
-                description="Le détail de chaque envoi reste consultable dans l’historique."
-                action={
-                  <LinkButton
-                    to="/history"
-                    size="sm"
-                    variant="ghost"
-                    iconAfter="chevron-right"
-                  >
-                    Voir l’historique
-                  </LinkButton>
-                }
-              />
-              <ul className="mt-3 space-y-3">
-                {groups.completed.slice(0, 3).map((campaign, index) => (
-                  <CampaignCard
-                    key={campaign.id}
-                    campaign={campaign}
-                    index={Math.min(index, 8)}
-                    onDelete={setToDelete}
-                  />
-                ))}
-              </ul>
-
-              {groups.completed.length > 3 && (
-                <p className="mt-3 text-center">
-                  <LinkButton to="/campaigns" size="sm" variant="ghost">
-                    Voir les {formatNumber(groups.completed.length)} campagnes terminées
-                  </LinkButton>
-                </p>
-              )}
             </section>
           )}
         </>
