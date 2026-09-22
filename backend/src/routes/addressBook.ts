@@ -3,17 +3,21 @@ import { Router, type Response } from 'express'
 import { isUuid, requireAuth, signedInUserId } from '../middleware/auth.js'
 import { validateBody } from '../middleware/validate.js'
 import {
+  addressBookExportSchema,
   addressBookQuerySchema,
+  copyToCampaignSchema,
+  type CopyToCampaignInput,
   createAddressBookContactSchema,
   updateAddressBookContactSchema,
   type CreateAddressBookContactInput,
   type UpdateAddressBookContactInput,
 } from '../schemas/addressBook.js'
-import type {
-  AddressBookRepository,
-  AddressBookRow,
-  ContactDetails,
-  WriteOutcome,
+import {
+  addressBookToCsv,
+  type AddressBookRepository,
+  type AddressBookRow,
+  type ContactDetails,
+  type WriteOutcome,
 } from '../services/addressBook.js'
 import { normaliseEmail } from '../services/contactImport.js'
 
@@ -42,10 +46,15 @@ export function createAddressBookRouter({
         return
       }
 
-      const { campaign_id: campaignId, ...rest } = query.data
+      const {
+        campaign_id: campaignId,
+        exclude_campaign_id: excludeCampaignId,
+        ...rest
+      } = query.data
       const { contacts, total } = await addressBook.list(signedInUserId(req), {
         ...rest,
         campaignId,
+        excludeCampaignId,
       })
 
       res.json({
@@ -54,6 +63,66 @@ export function createAddressBookRouter({
         limit: query.data.limit,
         offset: query.data.offset,
       })
+    })().catch(next)
+  })
+
+  /**
+   * Every contact the current filters match, as a CSV, in the order the page
+   * shows them. The same filters as the list, so what is exported is what the
+   * user was looking at, all pages at once.
+   */
+  router.get('/export', (req, res, next) => {
+    void (async () => {
+      const query = addressBookExportSchema.safeParse(req.query)
+
+      if (!query.success) {
+        res.status(400).json({ error: 'Invalid query' })
+        return
+      }
+
+      const {
+        campaign_id: campaignId,
+        exclude_campaign_id: excludeCampaignId,
+        timezone,
+        ...rest
+      } = query.data
+      const rows = await addressBook.all(signedInUserId(req), {
+        ...rest,
+        campaignId,
+        excludeCampaignId,
+      })
+
+      res.setHeader('content-type', 'text/csv; charset=utf-8')
+      res.setHeader('content-disposition', 'attachment; filename="contacts.csv"')
+      // The file holds people's addresses; no shared cache should keep a copy.
+      res.setHeader('cache-control', 'no-store')
+      res.send(addressBookToCsv(rows, timezone))
+    })().catch(next)
+  })
+
+  /**
+   * Loads contacts the account already has into a draft: a user writing to
+   * the same companies again should not have to export and re-import them.
+   */
+  router.post('/copy', validateBody(copyToCampaignSchema), (req, res, next) => {
+    void (async () => {
+      const input = req.body as CopyToCampaignInput
+      const outcome = await addressBook.copyToCampaign(
+        signedInUserId(req),
+        input.campaign_id,
+        input.contact_ids,
+      )
+
+      if (outcome.kind === 'not_found') {
+        res.status(404).json({ error: 'Campaign not found' })
+      } else if (outcome.kind === 'not_editable') {
+        res.status(409).json({
+          error: 'The campaign has been launched: its contacts can no longer be changed',
+          code: 'campaign_not_editable',
+        })
+      } else {
+        res.status(201).json({ imported: outcome.imported })
+      }
     })().catch(next)
   })
 

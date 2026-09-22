@@ -243,5 +243,58 @@ describe(
       )
       assert.equal(rows[0]?.total_contacts, 1)
     })
+
+    it('copies picked contacts into a draft, once per address, never another account’s', async () => {
+      const { rows: created } = await pool.query<{ id: string }>(
+        "INSERT INTO campaigns (user_id, name) VALUES ($1, 'Cible') RETURNING id",
+        [userId],
+      )
+      const targetId = created[0]?.id ?? NOBODY
+
+      const pick = async (search: string) =>
+        (await book.list(userId, query({ search }))).contacts.map((row) => row.id)
+      const { rows: theirs } = await pool.query<{ id: string }>(
+        'SELECT id FROM contacts WHERE campaign_id = $1',
+        [theirsId],
+      )
+
+      const ids = [
+        ...(await pick('zoe@')),
+        ...(await pick('nemo@')),
+        ...theirs.map((row) => row.id),
+      ]
+
+      assert.deepEqual(await book.copyToCampaign(userId, targetId, ids), {
+        kind: 'copied',
+        imported: 2,
+      })
+      // Picked again: the campaign already holds both.
+      assert.deepEqual(await book.copyToCampaign(userId, targetId, ids), {
+        kind: 'copied',
+        imported: 0,
+      })
+      assert.equal(
+        (await book.copyToCampaign(userId, launchedId, ids)).kind,
+        'not_editable',
+      )
+      assert.equal((await book.copyToCampaign(userId, theirsId, ids)).kind, 'not_found')
+
+      // Zoé now sits in two campaigns: one person to pick, and none left to
+      // add to the campaign that already has her.
+      assert.equal((await book.list(userId, query({ search: 'zoe@' }))).total, 2)
+      assert.equal(
+        (await book.list(userId, query({ search: 'zoe@', unique: true }))).total,
+        1,
+      )
+      assert.equal(
+        (
+          await book.list(
+            userId,
+            query({ search: 'zoe@', unique: true, excludeCampaignId: targetId }),
+          )
+        ).total,
+        0,
+      )
+    })
   },
 )

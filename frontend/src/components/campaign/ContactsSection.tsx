@@ -19,6 +19,8 @@ import {
 } from '@/services/contacts'
 import { formatNumber } from '@/services/format'
 
+import { PickContactsDialog } from '../contacts/PickContactsDialog'
+
 import { AddContactDialog } from './AddContactDialog'
 import { ImportDialog } from './ImportDialog'
 
@@ -79,6 +81,7 @@ export function ContactsSection({
   const [failed, setFailed] = useState(false)
   const [importing, setImporting] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [picking, setPicking] = useState(false)
 
   const finished = campaignStatus === 'completed'
 
@@ -150,12 +153,12 @@ export function ContactsSection({
         }
         description={
           editable
-            ? 'Importez un CSV ou ajoutez une adresse à la main : les contacts s’ajoutent à la suite des précédents.'
+            ? 'Importez un CSV, reprenez des contacts de vos autres campagnes ou ajoutez une adresse à la main : ils s’ajoutent à la suite des précédents.'
             : 'La liste des destinataires de cette campagne.'
         }
         action={
           editable && (
-            <span className="flex items-center gap-2">
+            <span className="flex flex-wrap items-center justify-end gap-2">
               <Button
                 variant="secondary"
                 size="sm"
@@ -165,6 +168,16 @@ export function ContactsSection({
                 }}
               >
                 Ajouter
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="users"
+                onClick={() => {
+                  setPicking(true)
+                }}
+              >
+                Mes contacts
               </Button>
               <Button
                 variant="secondary"
@@ -203,6 +216,17 @@ export function ContactsSection({
                   }}
                 >
                   Importer un fichier CSV
+                </Button>
+                {/* The contacts of earlier campaigns: writing to the same
+                    companies again should not start with an export. */}
+                <Button
+                  variant="secondary"
+                  icon="users"
+                  onClick={() => {
+                    setPicking(true)
+                  }}
+                >
+                  Choisir dans mes contacts
                 </Button>
                 {/* Secondary, and second: a campaign is normally filled from a
                     file, and adding hundreds of contacts one at a time is not
@@ -406,6 +430,18 @@ export function ContactsSection({
           setImporting(false)
         }}
         onImported={() => {
+          onChanged()
+          void load()
+        }}
+      />
+
+      <PickContactsDialog
+        open={picking}
+        campaignId={campaignId}
+        onClose={() => {
+          setPicking(false)
+        }}
+        onAdded={() => {
           onChanged()
           void load()
         }}

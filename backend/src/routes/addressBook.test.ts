@@ -31,12 +31,14 @@ function row(email: string): AddressBookRow {
     salutation: null,
     status: 'pending',
     source: 'csv',
+    error_message: null,
     created_at: new Date('2026-09-22T10:00:00Z'),
     sent_at: null,
   }
 }
 
 let lastQuery: AddressBookQuery | null = null
+let lastExport: Omit<AddressBookQuery, 'limit' | 'offset'> | null = null
 let lastDetails: ContactDetails | null = null
 let outcome: WriteOutcome = { kind: 'saved', contact: row('a@exemple.fr') }
 
@@ -53,7 +55,25 @@ const addressBook: AddressBookRepository = {
     lastDetails = details
     return Promise.resolve(outcome)
   },
+  all: (_userId, query) => {
+    lastExport = query
+    return Promise.resolve([
+      row('a@exemple.fr'),
+      {
+        ...row('=cmd@exemple.fr'),
+        company_name: '=HYPERLINK("x")',
+        status: 'sent',
+        sent_at: new Date('2026-09-22T08:30:00Z'),
+      },
+    ])
+  },
   remove: (_userId, contactId) => Promise.resolve(contactId === CONTACT),
+  copyToCampaign: (_userId, campaignId, ids) =>
+    Promise.resolve(
+      campaignId === CAMPAIGN
+        ? { kind: 'copied', imported: ids.length }
+        : { kind: 'not_found' },
+    ),
 }
 
 let baseUrl: string
@@ -115,7 +135,9 @@ describe('GET /contacts', () => {
       order: 'asc',
       limit: 25,
       offset: 0,
+      unique: false,
       campaignId: undefined,
+      excludeCampaignId: undefined,
     })
   })
 
@@ -129,6 +151,8 @@ describe('GET /contacts', () => {
       status: 'sent',
       source: 'mailfind',
       campaignId: CAMPAIGN,
+      unique: false,
+      excludeCampaignId: undefined,
       sort: 'name',
       order: 'desc',
       limit: 10,
@@ -151,6 +175,95 @@ describe('GET /contacts', () => {
     assert.ok(first)
     assert.equal(first.campaign.name, 'Alternance')
     assert.equal(first.source, 'csv')
+  })
+})
+
+describe('GET /contacts/export', () => {
+  it('exports every contact the filters match, not one page', async () => {
+    const res = await call(
+      '/export?search=acme&sort=name&order=desc&timezone=Europe/Paris',
+    )
+
+    assert.equal(res.status, 200)
+    assert.match(res.headers.get('content-type') ?? '', /text\/csv/)
+    assert.equal(res.headers.get('cache-control'), 'no-store')
+    assert.deepEqual(lastExport, {
+      search: 'acme',
+      sort: 'name',
+      order: 'desc',
+      unique: false,
+      campaignId: undefined,
+      excludeCampaignId: undefined,
+    })
+  })
+
+  it('carries every characteristic, dates in the reader’s zone, formulas neutralised', async () => {
+    const bytes = new Uint8Array(
+      await (await call('/export?timezone=Europe/Paris')).arrayBuffer(),
+    )
+    // Read as bytes: decoding as text would drop the mark this checks for.
+    assert.deepEqual([...bytes.slice(0, 3)], [0xef, 0xbb, 0xbf], 'a BOM, for Excel')
+    const [header, first, second] = new TextDecoder().decode(bytes).split('\r\n')
+
+    assert.equal(
+      header,
+      '"adresse","contact","entreprise","civilite","statut","origine","campagne","type_campagne","statut_campagne","ajoute_le","envoye_le","erreur"',
+    )
+    assert.match(
+      first ?? '',
+      /^"a@exemple\.fr","Ana","Acme","","en attente","import CSV","Alternance",/,
+    )
+    // 08:30 UTC is 10:30 in Paris in September.
+    assert.match(second ?? '', /"2026-09-22 10:30:00"/)
+    assert.ok(
+      !(second ?? '').includes('"=HYPERLINK'),
+      'a formula must not reach a spreadsheet as one',
+    )
+  })
+
+  it('refuses an unknown zone', async () => {
+    assert.equal((await call('/export?timezone=Nulle/Part')).status, 400)
+  })
+})
+
+describe('POST /contacts/copy', () => {
+  it('copies contacts into a draft and says how many', async () => {
+    const res = await call('/copy', {
+      method: 'POST',
+      body: JSON.stringify({ campaign_id: CAMPAIGN, contact_ids: [CONTACT] }),
+    })
+
+    assert.equal(res.status, 201)
+    assert.deepEqual(await res.json(), { imported: 1 })
+  })
+
+  it('answers 404 for a campaign that is not the user’s', async () => {
+    const res = await call('/copy', {
+      method: 'POST',
+      body: JSON.stringify({
+        campaign_id: 'eeeeeeee-5555-4555-8555-555555555555',
+        contact_ids: [CONTACT],
+      }),
+    })
+
+    assert.equal(res.status, 404)
+  })
+
+  it('refuses an empty selection', async () => {
+    const res = await call('/copy', {
+      method: 'POST',
+      body: JSON.stringify({ campaign_id: CAMPAIGN, contact_ids: [] }),
+    })
+
+    assert.equal(res.status, 400)
+  })
+
+  it('reads unique and exclude_campaign_id for a picker', async () => {
+    await call(`?unique=true&exclude_campaign_id=${CAMPAIGN}`)
+    const received = lastQuery
+    assert.ok(received)
+    assert.equal(received.unique, true)
+    assert.equal(received.excludeCampaignId, CAMPAIGN)
   })
 })
 

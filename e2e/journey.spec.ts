@@ -190,6 +190,45 @@ test('a user prepares a campaign, launches it and follows it to the end', async 
     await dialog.getByLabel('Nom du contact').fill('Ana Lopez')
     await dialog.getByRole('button', { name: 'Enregistrer' }).click()
 
+    // The answer is a confirmation in the dialog, not a toast that slides away.
+    await expect(page.getByRole('heading', { name: 'Contact modifié' })).toBeVisible()
+    await dialog.getByRole('button', { name: 'Terminé' }).click()
     await expect(page.getByText('Ana Lopez')).toBeVisible()
+  })
+
+  await test.step('turns a selection of contacts into a new campaign', async () => {
+    await page.getByRole('searchbox').fill('')
+    await expect(page.getByText('4 contacts au total.')).toBeVisible()
+
+    await page.getByRole('checkbox', { name: 'Tout sélectionner sur cette page' }).check()
+    await page.getByRole('button', { name: 'Créer une campagne' }).click()
+
+    const dialog = page.getByRole('dialog')
+    await dialog.getByLabel('Nom de la campagne').fill('Depuis les contacts')
+    await dialog.getByRole('button', { name: 'Créer la campagne' }).click()
+
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Depuis les contacts' }),
+    ).toBeVisible()
+    // Four selected, two addresses: each address is copied once.
+    await expect(page.getByRole('heading', { name: 'Contacts (2)' })).toBeVisible()
+  })
+
+  await test.step('offers the account’s contacts to a draft, minus the ones it has', async () => {
+    await page.getByRole('button', { name: 'Mes contacts' }).click()
+
+    // Both addresses of the account are already in this campaign.
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByText('Aucun contact à ajouter')).toBeVisible()
+    await dialog.getByRole('button', { name: 'Annuler' }).click()
+  })
+
+  await test.step('exports every contact as a CSV', async () => {
+    const response = await page.request.get('/api/contacts/export?timezone=Europe/Paris')
+    expect(response.status()).toBe(200)
+
+    const csv = await response.text()
+    expect(csv).toContain('"ana@example.test"')
+    expect(csv).toContain('"Depuis les contacts"')
   })
 })

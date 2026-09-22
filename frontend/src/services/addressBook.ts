@@ -30,6 +30,10 @@ export interface AddressBookQuery {
   status?: ContactStatus | undefined
   source?: ContactSource | undefined
   campaignId?: string | undefined
+  /** One row per address, the most recent, rather than one per campaign. */
+  unique?: boolean | undefined
+  /** Leaves out the addresses this campaign already holds. */
+  excludeCampaignId?: string | undefined
   sort: AddressBookSort
   order: 'asc' | 'desc'
   limit: number
@@ -55,19 +59,25 @@ export function sourceLabel(source: ContactSource): string {
 
 export const CONTACT_SOURCES = Object.keys(SOURCE_LABELS) as ContactSource[]
 
-function queryString(query: AddressBookQuery): string {
-  const params = new URLSearchParams({
-    sort: query.sort,
-    order: query.order,
-    limit: String(query.limit),
-    offset: String(query.offset),
-  })
+type Filters = Omit<AddressBookQuery, 'limit' | 'offset'>
+
+function filterParams(query: Filters): URLSearchParams {
+  const params = new URLSearchParams({ sort: query.sort, order: query.order })
 
   if (query.search) params.set('search', query.search)
   if (query.status) params.set('status', query.status)
   if (query.source) params.set('source', query.source)
   if (query.campaignId) params.set('campaign_id', query.campaignId)
+  if (query.unique) params.set('unique', 'true')
+  if (query.excludeCampaignId) params.set('exclude_campaign_id', query.excludeCampaignId)
 
+  return params
+}
+
+function queryString(query: AddressBookQuery): string {
+  const params = filterParams(query)
+  params.set('limit', String(query.limit))
+  params.set('offset', String(query.offset))
   return params.toString()
 }
 
@@ -86,4 +96,21 @@ export const addressBookApi = {
     api.patch<{ contact: BookContact }>(`/contacts/${id}`, fields).then((r) => r.contact),
 
   remove: (id: string) => api.delete(`/contacts/${id}`),
+
+  /** A plain link: the browser downloads, the session cookie rides along. */
+  exportUrl: (filters: Filters) => {
+    const params = filterParams(filters)
+    params.set('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone)
+    return `/api/contacts/export?${params.toString()}`
+  },
+
+  /**
+   * Copies contacts of the address book into a draft campaign, server-side.
+   * An address the campaign already holds is skipped, not doubled.
+   */
+  copyToCampaign: (campaignId: string, contactIds: string[]) =>
+    api.post<{ imported: number }>('/contacts/copy', {
+      campaign_id: campaignId,
+      contact_ids: contactIds,
+    }),
 }

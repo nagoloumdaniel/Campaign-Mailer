@@ -253,7 +253,7 @@ export function campaignTypeLabel(type: CampaignType): string {
 }
 
 /** `YYYY-MM-DD HH:mm:ss` in the reader's own zone; the sv-SE locale writes that shape. */
-function formatInZone(date: Date, timezone: string): string {
+export function formatInZone(date: Date, timezone: string): string {
   return new Intl.DateTimeFormat('sv-SE', {
     timeZone: timezone,
     year: 'numeric',
