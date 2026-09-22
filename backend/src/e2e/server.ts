@@ -87,6 +87,10 @@ const engine: SendEngineDeps = {
  */
 function sendingHour(): Date {
   const at = new Date()
+  // Nothing goes out on Sunday: a run on a Sunday plans Saturday's noon.
+  if (at.getUTCDay() === 0) {
+    at.setUTCDate(at.getUTCDate() - 1)
+  }
   at.setUTCHours(12, 0, 0, 0)
   return at
 }

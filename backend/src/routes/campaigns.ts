@@ -8,7 +8,9 @@ import {
   CONTENT_FIELDS,
   createCampaignSchema,
   followUpSchema,
+  insideSendingWindow,
   previewSchema,
+  startCampaignSchema,
   updateCampaignSchema,
   type CreateCampaignInput,
   type FollowUpInput,
@@ -248,6 +250,14 @@ export function createCampaignRouter(
       dispatch: boolean
       action: AuditAction
       precondition?: (campaign: CampaignRow) => Promise<string | null>
+      /**
+       * Reads the request and stores what the move needs, before it is made.
+       * Answers the refusal to send back, or null to go on.
+       */
+      prepare?: (
+        body: unknown,
+        campaign: CampaignRow,
+      ) => Promise<{ status: number; body: Record<string, unknown> } | null>
     },
   ) => {
     router.post(path, (req, res, next) => {
@@ -276,6 +286,13 @@ export function createCampaignRouter(
           // 422: the request is understood and allowed, the campaign is not
           // ready for it.
           res.status(422).json({ error: blocker })
+          return
+        }
+
+        const refusal = move.prepare ? await move.prepare(req.body, current) : null
+
+        if (refusal) {
+          res.status(refusal.status).json(refusal.body)
           return
         }
 
@@ -313,6 +330,36 @@ export function createCampaignRouter(
       if ((await campaigns.countPendingContacts(campaign.id)) === 0) {
         return 'The campaign has no contact left to send to'
       }
+      return null
+    },
+    /**
+     * Now, or at the day and hour the user chose, in the browser's zone, which
+     * the campaign takes: the zone is never a setting, it is where the user is.
+     */
+    prepare: async (body, campaign) => {
+      const input = startCampaignSchema.safeParse(body ?? {})
+
+      if (!input.success) {
+        return {
+          status: 400,
+          body: { error: 'Invalid schedule', code: 'invalid_schedule' },
+        }
+      }
+
+      const timezone = input.data.timezone ?? campaign.timezone
+      const sendAfter = input.data.send_after ? new Date(input.data.send_after) : null
+
+      if (sendAfter && !insideSendingWindow(sendAfter, timezone)) {
+        return {
+          status: 400,
+          body: {
+            error: 'Sending happens Monday to Saturday, 09:00 to 18:59',
+            code: 'outside_send_window',
+          },
+        }
+      }
+
+      await campaigns.update(campaign.id, { timezone, send_after: sendAfter })
       return null
     },
   })
@@ -395,6 +442,7 @@ function toPublicCampaign(row: CampaignRow) {
     mailsPerDay: row.mails_per_day,
     startHour: row.start_hour,
     pauseMs: row.pause_ms,
+    sendAfter: row.send_after?.toISOString() ?? null,
     timezone: row.timezone,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),

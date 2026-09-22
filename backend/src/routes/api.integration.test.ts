@@ -173,7 +173,7 @@ describe(
           name: 'Candidatures',
           subject: 'Candidature chez {{company_name|votre équipe}}',
           body_html: '<p>Bonjour {{contact_name|Madame, Monsieur}}</p>',
-          pause_ms: 30_000,
+          timezone: 'Europe/Paris',
         },
       })
       assert.equal(created.status, 201)

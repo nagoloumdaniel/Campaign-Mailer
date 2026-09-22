@@ -13,13 +13,7 @@ import {
   remainingOf,
   type Campaign,
 } from '@/services/campaigns'
-import {
-  countOf,
-  formatDate,
-  formatHour,
-  formatNumber,
-  formatPercent,
-} from '@/services/format'
+import { countOf, formatDate, formatNumber, formatPercent } from '@/services/format'
 
 import { LaunchDialog } from './LaunchDialog'
 
@@ -181,8 +175,11 @@ export function SendControls({
           onClose={() => {
             setLaunching(false)
           }}
-          onConfirm={() => {
-            void act(campaignsApi.start, 'Campagne lancée.').then((ok) => {
+          onConfirm={(sendAfter) => {
+            void act(
+              (id) => campaignsApi.start(id, sendAfter),
+              sendAfter ? 'Campagne programmée.' : 'Campagne lancée.',
+            ).then((ok) => {
               if (ok) {
                 setLaunching(false)
               }
@@ -209,7 +206,8 @@ function ceilingReached(campaign: Campaign): boolean {
 /** Why the campaign cannot be launched yet, in the user's terms; null when it can. */
 function launchBlocker(campaign: Campaign, dirty: boolean): string | null {
   if (dirty) {
-    return 'Enregistrez vos modifications avant de lancer.'
+    // Saving is automatic: this lasts the second it takes.
+    return 'Enregistrement de vos modifications…'
   }
   if (!campaign.subject?.trim()) {
     return 'Ajoutez un objet avant de lancer.'
@@ -223,14 +221,22 @@ function launchBlocker(campaign: Campaign, dirty: boolean): string | null {
   return null
 }
 
-function statusSentence(campaign: Campaign): string {
-  const hour = formatHour(campaign.startHour)
+const SCHEDULED = new Intl.DateTimeFormat('fr-FR', {
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+  hour: '2-digit',
+  minute: '2-digit',
+})
 
+function statusSentence(campaign: Campaign): string {
   switch (campaign.status) {
     case 'draft':
       return 'Rien n’est envoyé tant que la campagne n’est pas lancée.'
     case 'scheduled':
-      return `Programmée : les envois commencent à ${hour}, heure de ${campaign.timezone.replace(/_/g, ' ')}, dans la plage ${SEND_WINDOW_LABEL}.`
+      return campaign.sendAfter && Date.parse(campaign.sendAfter) > Date.now()
+        ? `Programmée : le premier envoi part le ${SCHEDULED.format(new Date(campaign.sendAfter))}, puis les suivants ${SEND_WINDOW_LABEL}.`
+        : `Programmée : les envois commencent à l’ouverture suivante, ${SEND_WINDOW_LABEL}.`
     case 'running':
       return fitsInOneDay(campaign)
         ? `En cours : les messages partent un par un, dans la plage ${SEND_WINDOW_LABEL}.`

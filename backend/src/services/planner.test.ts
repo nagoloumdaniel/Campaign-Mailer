@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import {
+  FIRST_SEND_HOUR,
   LAST_SEND_HOUR,
+  isSendDay,
   localHour,
   planDay,
   windowRemainingMs,
@@ -161,32 +163,52 @@ describe('when', () => {
 })
 
 describe('the sending window', () => {
-  it('closes at the end of the last send hour', () => {
-    // 18:05 in Paris in July is 16:05 UTC. Nothing is queued: a campaign
-    // launched in the evening starts the next morning, which is what the
-    // interface promised.
-    const outcome = planDay(
-      input({ now: new Date('2026-07-01T16:05:00Z'), startHour: 10 }),
-    )
+  // 1 July 2026 is a Wednesday. Paris is UTC+2 in summer: 17:00 UTC is 19:00.
+  it('closes at the end of the last send hour, 18:59', () => {
+    // 19:05 in Paris. Nothing is queued: a campaign launched in the evening
+    // starts the next morning, which is what the interface promised.
+    const outcome = planDay(input({ now: new Date('2026-07-01T17:05:00Z') }))
 
     assert.deepEqual(outcome, { kind: 'after_send_window' })
   })
 
   it('still plans during the last send hour', () => {
-    // 17:05 in Paris, the last hour a send may begin.
-    const outcome = planDay(
-      input({ now: new Date('2026-07-01T15:05:00Z'), startHour: 10 }),
-    )
+    // 18:05 in Paris, the last hour a send may begin.
+    const outcome = planDay(input({ now: new Date('2026-07-01T16:05:00Z') }))
 
     assert.equal(outcome.kind, 'planned')
   })
 
+  it('opens at 09:00', () => {
+    assert.equal(
+      planDay(input({ now: new Date('2026-07-01T06:59:00Z') })).kind,
+      'before_start_hour',
+    )
+    assert.equal(
+      planDay(input({ now: new Date('2026-07-01T07:00:00Z') })).kind,
+      'planned',
+    )
+  })
+
+  it('sends on Saturday and never on Sunday, on the campaign’s clock', () => {
+    // Saturday 4 July, noon in Paris.
+    assert.equal(
+      planDay(input({ now: new Date('2026-07-04T10:00:00Z') })).kind,
+      'planned',
+    )
+    // Sunday 5 July, noon in Paris.
+    assert.deepEqual(planDay(input({ now: new Date('2026-07-05T10:00:00Z') })), {
+      kind: 'closed_day',
+    })
+    // 23:30 on Saturday in UTC is already Sunday 01:30 in Paris.
+    assert.equal(isSendDay(new Date('2026-07-04T23:30:00Z'), 'Europe/Paris'), false)
+  })
+
   it('stops the plan where the window ends rather than delivering into the night', () => {
-    // 17:00 in Paris, one hour of window left, five minutes between sends:
+    // 18:00 in Paris, one hour of window left, five minutes between sends:
     // twelve fit, the rest wait for tomorrow morning.
     const planned = sends({
-      now: new Date('2026-07-01T15:00:00Z'),
-      startHour: 10,
+      now: new Date('2026-07-01T16:00:00Z'),
       pauseMs: 300_000,
       mailsPerDay: 100,
       accountLimit: 450,
@@ -201,11 +223,10 @@ describe('the sending window', () => {
   })
 
   it('reports a closed window when nothing fits, rather than an empty plan', () => {
-    // 17:59:30 in Paris: half a minute left, and the pause is longer than that.
+    // 18:59:59 in Paris: a second left, and the pause is longer than that.
     const outcome = planDay(
       input({
-        now: new Date('2026-07-01T15:59:59Z'),
-        startHour: 10,
+        now: new Date('2026-07-01T16:59:59Z'),
         pauseMs: 600_000,
         pendingContactIds: ids(3),
       }),
@@ -218,15 +239,16 @@ describe('the sending window', () => {
   it('counts what is left of the window from the campaign’s own clock', () => {
     const at = new Date('2026-07-01T15:00:00Z')
 
-    // 17:00 in Paris: one hour to 18:00.
-    assert.equal(windowRemainingMs(at, 'Europe/Paris'), 60 * 60 * 1000)
+    // 17:00 in Paris: two hours to 19:00.
+    assert.equal(windowRemainingMs(at, 'Europe/Paris'), 2 * 60 * 60 * 1000)
     // The same instant is 16:00 in London, which keeps summer time too.
-    assert.equal(windowRemainingMs(at, 'Europe/London'), 2 * 60 * 60 * 1000)
+    assert.equal(windowRemainingMs(at, 'Europe/London'), 3 * 60 * 60 * 1000)
     // An hour earlier it is 23:00 in Tokyo, where the window closed long ago.
     assert.equal(windowRemainingMs(new Date('2026-07-01T14:00:00Z'), 'Asia/Tokyo'), 0)
   })
 
-  it('names the last hour a user may choose as a start hour', () => {
-    assert.equal(LAST_SEND_HOUR, 17)
+  it('opens at 09:00 and lets a send begin up to 18:59', () => {
+    assert.equal(FIRST_SEND_HOUR, 9)
+    assert.equal(LAST_SEND_HOUR, 18)
   })
 })

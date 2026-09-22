@@ -38,6 +38,7 @@ function baseCampaign(): CampaignRow {
     created_at: new Date('2026-06-30T10:00:00Z'),
     updated_at: new Date('2026-06-30T10:00:00Z'),
     scheduled_at: null,
+    send_after: null,
     started_at: null,
     completed_at: null,
   }

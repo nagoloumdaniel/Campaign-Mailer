@@ -80,6 +80,7 @@ export function createDashboardRouter({
             oldestSendInWindowAt: window.oldestInWindowAt,
             lastSentAt: window.lastSentAt,
             nextPlannedAt: window.nextPlannedAt,
+            sendAfter: row.send_after,
           })
 
           return {

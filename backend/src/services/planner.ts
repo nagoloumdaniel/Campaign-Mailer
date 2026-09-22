@@ -10,18 +10,18 @@
 const JITTER = 0.2
 
 /**
- * The last hour of the day a send may begin, on the campaign's wall clock.
+ * The sending window, on the campaign's wall clock: Monday to Saturday, from
+ * the start of hour 9 to the end of hour 18 (owner's decision, 22 September
+ * 2026). Mirrors FIRST_SEND_HOUR and LAST_SEND_HOUR in schemas/campaign.ts,
+ * kept as numbers here so this module stays free of the HTTP layer.
  *
- * Mirrors LAST_SEND_HOUR in schemas/campaign.ts, which is what a user may
- * choose as a start hour. Kept as a number here rather than imported, so this
- * module stays free of the HTTP layer's schemas.
- *
- * The window closes at the end of that hour, so 17 means "nothing starts at
- * 18:00 or later".
+ * LAST is the last hour a send may *begin*: 18 means "nothing starts at 19:00
+ * or later".
  */
-export const LAST_SEND_HOUR = 17
+export const FIRST_SEND_HOUR = 9
+export const LAST_SEND_HOUR = 18
 
-/** The instant the window closes: the first millisecond of hour 18. */
+/** The instant the window closes: the first millisecond of hour 19. */
 const WINDOW_END_HOUR = LAST_SEND_HOUR + 1
 
 /**
@@ -64,8 +64,10 @@ export interface PlannedSend {
 export type PlanOutcome =
   | { kind: 'planned'; sends: PlannedSend[] }
   | { kind: 'before_start_hour' }
-  /** Past 17:59 on the campaign's clock. The next pass plans tomorrow morning. */
+  /** Past 18:59 on the campaign's clock. The next pass plans the next morning. */
   | { kind: 'after_send_window' }
+  /** Sunday on the campaign's clock: nothing goes out until Monday morning. */
+  | { kind: 'closed_day' }
   | { kind: 'campaign_quota_reached' }
   | { kind: 'account_quota_reached' }
   | { kind: 'nothing_pending' }
@@ -87,7 +89,7 @@ export function localHour(now: Date, timezone: string): number {
  * How long the sending window still has to run, in milliseconds, or 0 once it
  * has closed.
  *
- * Counted to the start of hour 18 on the campaign's wall clock, minutes and
+ * Counted to the start of hour 19 on the campaign's wall clock, minutes and
  * seconds of the current hour taken off. A minute's granularity is plenty: the
  * shortest pause between two sends is ten seconds.
  */
@@ -109,7 +111,21 @@ export function windowRemainingMs(now: Date, timezone: string): number {
   return Math.max(0, WINDOW_END_HOUR * 3_600_000 - elapsed)
 }
 
+/** False on Sunday, on the campaign's wall clock. */
+export function isSendDay(at: Date, timezone: string): boolean {
+  const weekday = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    weekday: 'short',
+  }).format(at)
+
+  return weekday !== 'Sun'
+}
+
 export function planDay(input: PlanInput): PlanOutcome {
+  if (!isSendDay(input.now, input.timezone)) {
+    return { kind: 'closed_day' }
+  }
+
   const hour = localHour(input.now, input.timezone)
 
   if (hour < input.startHour) {
@@ -167,7 +183,7 @@ export function planDay(input: PlanInput): PlanOutcome {
       delayMs = Math.max(delayMs, freesAt - nowMs + FREED_SLOT_MARGIN_MS)
     }
 
-    // A send whose delay lands past 17:59 is not queued: 450 messages thirty
+    // A send whose delay lands past 18:59 is not queued: 450 messages thirty
     // seconds apart run nearly four hours, and a plan made at 16:00 would
     // otherwise deliver into the night. The contact stays pending and the next
     // morning's pass takes it, which is the same rule as the daily ceiling.

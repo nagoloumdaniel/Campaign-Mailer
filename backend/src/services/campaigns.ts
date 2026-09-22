@@ -24,6 +24,8 @@ export interface CampaignRow {
   created_at: Date
   updated_at: Date
   scheduled_at: Date | null
+  /** The day and hour the user scheduled the launch for; null means as soon as possible. */
+  send_after: Date | null
   started_at: Date | null
   completed_at: Date | null
 }
@@ -49,7 +51,11 @@ export interface CampaignAttachmentRow {
  */
 export const MAX_ATTACHMENTS = 5
 
-/** The fields a client may set. Counters and timestamps are the server's. */
+/**
+ * The fields that may be written. Counters and timestamps are the server's;
+ * so are the start hour and the pause, fixed since 22 September 2026.
+ * `send_after` is set by the launch route, not by a PATCH.
+ */
 export interface CampaignWritableFields {
   name: string
   type: CampaignType
@@ -57,9 +63,8 @@ export interface CampaignWritableFields {
   body_html: string | null
   body_text: string | null
   mails_per_day: number
-  start_hour: number
-  pause_ms: number
   timezone: string
+  send_after: Date | null
 }
 
 /**
@@ -70,7 +75,7 @@ const COLUMNS = `
   id, user_id, name, type, subject, body_html, body_text, status,
   total_contacts, sent_count, error_count,
   mails_per_day, start_hour, pause_ms, timezone,
-  created_at, updated_at, scheduled_at, started_at, completed_at
+  created_at, updated_at, scheduled_at, send_after, started_at, completed_at
 `
 
 const ATTACHMENT_COLUMNS = `
@@ -156,9 +161,8 @@ const PATCHABLE = new Set<keyof CampaignWritableFields>([
   'body_html',
   'body_text',
   'mails_per_day',
-  'start_hour',
-  'pause_ms',
   'timezone',
+  'send_after',
 ])
 
 export function createCampaignRepository(pool: Pool): CampaignRepository {
@@ -186,10 +190,12 @@ export function createCampaignRepository(pool: Pool): CampaignRepository {
 
     async create(userId, input) {
       const { rows } = await pool.query<CampaignRow>(
+        // The start hour and the pause take the column defaults, 09:00 and
+        // thirty seconds: neither is the user's to choose.
         `INSERT INTO campaigns (user_id, name, type, subject, body_html, body_text,
-                                mails_per_day, start_hour, pause_ms, timezone)
+                                mails_per_day, timezone)
          VALUES ($1, $2, COALESCE($3::campaign_type, 'autre'), $4, $5, $6,
-                 COALESCE($7, 46), COALESCE($8, 10), COALESCE($9, 30000), COALESCE($10, 'Europe/Paris'))
+                 COALESCE($7, 46), COALESCE($8, 'Europe/Paris'))
          RETURNING ${COLUMNS}`,
         [
           userId,
@@ -199,8 +205,6 @@ export function createCampaignRepository(pool: Pool): CampaignRepository {
           input.body_html ?? null,
           input.body_text ?? null,
           input.mails_per_day ?? null,
-          input.start_hour ?? null,
-          input.pause_ms ?? null,
           input.timezone ?? null,
         ],
       )

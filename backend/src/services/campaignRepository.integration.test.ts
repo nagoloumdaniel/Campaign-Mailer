@@ -71,7 +71,7 @@ describe(
         {
           status: 'draft',
           mails_per_day: 46,
-          start_hour: 10,
+          start_hour: 9,
           pause_ms: 30_000,
           timezone: 'Europe/Paris',
           total_contacts: 0,
@@ -102,12 +102,12 @@ describe(
 
       const updated = await campaigns.update(created.id, {
         name: 'After',
-        pause_ms: 45_000,
+        mails_per_day: 45,
         subject: undefined,
       })
 
       assert.equal(updated?.name, 'After')
-      assert.equal(updated.pause_ms, 45_000)
+      assert.equal(updated.mails_per_day, 45)
       assert.equal(updated.timezone, 'Europe/Paris')
       await assert.rejects(campaigns.update(created.id, {}), /no patchable field/)
       assert.equal(await campaigns.update(NOBODY, { name: 'Ghost' }), null)

@@ -39,6 +39,19 @@ at most one check late, and the claim, the retries and the ceiling do not depend
 on when a job starts. A delayed job is seen coming: the check looks two and a
 half minutes ahead, so a send planned for 10:00:00 finds the worker awake.
 
+## The sending week
+
+Since 22 September 2026: Monday to Saturday, 09:00 to 18:59, on the
+campaign's own clock, and nothing on Sunday. `planDay` answers `closed_day` on
+a Sunday; the dispatcher's `retryAt` is always `nextOpening`, the next
+Monday-to-Saturday 09:00 at or after now, so a Saturday evening waits for
+Monday morning. The start hour is fixed at the opening (a CHECK holds it) and
+the pause at thirty seconds plus jitter; neither is a setting.
+
+A launch may name a day and hour (`send_after`). Until then the dispatcher
+answers `scheduled_later` with `retryAt = send_after`: the campaign stays
+`scheduled` and the worker plans at that second.
+
 ## When the plan runs
 
 Until 22 September 2026 the plan ran every fifteen minutes from whenever the
@@ -139,14 +152,16 @@ an expired claim is exactly the ambiguous one.
 
 ## Cadence
 
-Each campaign carries `mails_per_day`, `start_hour`, `pause_ms` and a time
-zone. The planner resolves the start hour in the campaign's zone, not the
-server's: a campaign set to nine in the morning must follow daylight saving,
+Each campaign carries `mails_per_day`, `start_hour` (always 09:00), `pause_ms`
+(always thirty seconds) and a time zone, the browser's. The planner resolves
+the start hour in the campaign's zone, not the server's: nine in the morning
+must follow daylight saving,
 which is why the schema stores an IANA zone and the validator refuses a fixed
 offset.
 
-Jobs are delayed, one per contact, spaced by `pause_ms` — ten seconds at least,
-thirty by default — plus a random jitter of up to twenty percent. The jitter is not decoration: a perfectly regular
+Jobs are delayed, one per contact, spaced by `pause_ms`, thirty seconds for
+every campaign since 22 September 2026 and no longer a setting, plus a random
+jitter of up to twenty percent. The jitter is not decoration: a perfectly regular
 interval is a signature, and sending in a burst is what gets an account
 flagged.
 

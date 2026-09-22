@@ -1,5 +1,5 @@
 import type { CampaignStatus } from './campaignState.js'
-import { LAST_SEND_HOUR, localHour } from './planner.js'
+import { LAST_SEND_HOUR, isSendDay, localHour } from './planner.js'
 
 /**
  * When a campaign will next send, and when it should finish.
@@ -29,6 +29,8 @@ export interface ScheduleInput {
   /** The oldest of those sends: the window frees 24 hours after it. */
   oldestSendInWindowAt: Date | null
   lastSentAt: Date | null
+  /** The day and hour the user scheduled the launch for, when later than now. */
+  sendAfter?: Date | null | undefined
   /**
    * The earliest send already queued, as the planner wrote it. When there is
    * one it is the answer, to the second; the rules below are only for a
@@ -120,34 +122,78 @@ export function atLocalHour(reference: Date, timezone: string, hour: number): Da
   return new Date(guess - offsetMs(new Date(first), timezone))
 }
 
-/** The next instant the wall clock reads `startHour`, tomorrow at the earliest. */
-function nextMorning(from: Date, timezone: string, startHour: number): Date {
-  return atLocalHour(new Date(from.getTime() + DAY_MS), timezone, startHour)
+/**
+ * The next time the window opens at or after `from`: `startHour` on the first
+ * day, today included, that is not a Sunday on the campaign's clock.
+ */
+export function nextOpening(from: Date, timezone: string, startHour: number): Date {
+  let day = from
+
+  // Eight days is always enough: at most one of them is a Sunday.
+  for (let step = 0; step < 8; step += 1) {
+    const opens = atLocalHour(day, timezone, startHour)
+
+    if (opens.getTime() >= from.getTime() && isSendDay(opens, timezone)) {
+      return opens
+    }
+
+    // From noon: twenty-four hours from 23:30 lands two calendar days later on
+    // the night the clocks go back; from noon it never leaves the next day.
+    day = new Date(atLocalHour(day, timezone, 12).getTime() + DAY_MS)
+  }
+
+  return atLocalHour(day, timezone, startHour)
 }
 
 /**
  * Moves an instant into the sending window.
  *
- * Before the start hour it waits for it the same day; past 17:59 it waits for
- * the next morning. Mirrors what the planner does, so what the interface
- * promises and what the worker executes are the same rule read twice.
+ * Inside the window it stays; before the start hour it waits for it the same
+ * day; past 18:59, or on a Sunday, it waits for the next opening. Mirrors what
+ * the planner does, so what the interface promises and what the worker
+ * executes are the same rule read twice.
  */
-function insideWindow(at: Date, timezone: string, startHour: number): Date {
+export function insideWindow(at: Date, timezone: string, startHour: number): Date {
   const hour = localHour(at, timezone)
 
-  if (hour < startHour) {
-    return atLocalHour(at, timezone, startHour)
+  if (isSendDay(at, timezone) && hour >= startHour && hour <= LAST_SEND_HOUR) {
+    return at
   }
 
-  return hour > LAST_SEND_HOUR ? nextMorning(at, timezone, startHour) : at
+  return nextOpening(at, timezone, startHour)
+}
+
+/** The opening `days` sending days after the one `from` falls on. */
+function addSendDays(
+  from: Date,
+  days: number,
+  timezone: string,
+  startHour: number,
+): Date {
+  let day = from
+
+  for (let step = 0; step < days; step += 1) {
+    day = nextOpening(
+      atLocalHour(new Date(day.getTime() + DAY_MS), timezone, startHour),
+      timezone,
+      startHour,
+    )
+  }
+
+  return day
 }
 
 function nextSendAt(input: ScheduleInput): Date {
-  const { now, timezone, startHour } = input
+  const { timezone, startHour } = input
+  // Nothing goes before the day and hour the launch was scheduled for.
+  const now =
+    input.sendAfter && input.sendAfter.getTime() > input.now.getTime()
+      ? input.sendAfter
+      : input.now
 
   if (input.sentLast24h >= input.mailsPerDay && input.oldestSendInWindowAt) {
     // The day's pace is spent. Sending resumes as the oldest send leaves the
-    // window — held back again if that falls outside the sending hours.
+    // window, held back again if that falls outside the sending hours.
     const frees = new Date(input.oldestSendInWindowAt.getTime() + DAY_MS)
     return insideWindow(frees, timezone, startHour)
   }
@@ -188,11 +234,8 @@ export function estimateSchedule(input: ScheduleInput): ScheduleEstimate {
 
   const extraDays = Math.ceil(rest / input.mailsPerDay)
   const lastBatch = rest - (extraDays - 1) * input.mailsPerDay
-  const lastDayStart = atLocalHour(
-    new Date(next.getTime() + extraDays * DAY_MS),
-    input.timezone,
-    input.startHour,
-  )
+  // Counted in sending days: a Sunday in between adds a day, not a batch.
+  const lastDayStart = addSendDays(next, extraDays, input.timezone, input.startHour)
 
   return {
     nextSendAt: next,

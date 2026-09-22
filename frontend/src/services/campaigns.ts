@@ -36,6 +36,8 @@ export interface Campaign {
   createdAt: string
   updatedAt: string
   scheduledAt: string | null
+  /** The day and hour the launch was scheduled for; null means as soon as possible. */
+  sendAfter: string | null
   startedAt: string | null
   completedAt: string | null
   /** Present on a single campaign, not in the list. */
@@ -104,7 +106,14 @@ export const campaignsApi = {
     subject?: string
     body_html?: string
     body_text?: string
-  }) => api.post<{ campaign: Campaign }>('/campaigns', input).then((r) => r.campaign),
+  }) =>
+    api
+      // The computer's zone, never asked: the campaign sends on the user's clock.
+      .post<{ campaign: Campaign }>('/campaigns', {
+        ...input,
+        timezone: browserTimeZone(),
+      })
+      .then((r) => r.campaign),
 
   /**
    * A follow-up built from contacts already written to. The server copies
@@ -128,8 +137,18 @@ export const campaignsApi = {
 
   templates: () => api.get<TemplateCatalogue>('/templates'),
 
-  start: (id: string) =>
-    api.post<{ campaign: Campaign }>(`/campaigns/${id}/start`).then((r) => r.campaign),
+  /**
+   * Launches now, or at the day and hour chosen (an ISO instant). The
+   * browser's zone goes with it: the campaign sends on the user's clock, and
+   * the zone is never something to set by hand.
+   */
+  start: (id: string, sendAfter: string | null = null) =>
+    api
+      .post<{ campaign: Campaign }>(`/campaigns/${id}/start`, {
+        timezone: browserTimeZone(),
+        ...(sendAfter ? { send_after: sendAfter } : {}),
+      })
+      .then((r) => r.campaign),
 
   pause: (id: string) =>
     api.post<{ campaign: Campaign }>(`/campaigns/${id}/pause`).then((r) => r.campaign),
@@ -271,19 +290,54 @@ export function fitsInOneDay(
 }
 
 /**
- * Office hours, on the campaign's own clock. Mirrors FIRST_SEND_HOUR and
- * LAST_SEND_HOUR on the server: nothing goes out before 10:00 or after 17:59,
- * and a campaign launched after the window starts the next morning.
+ * The sending window, on the campaign's own clock. Mirrors FIRST_SEND_HOUR and
+ * LAST_SEND_HOUR on the server: Monday to Saturday, nothing before 09:00 or
+ * after 18:59 (owner's decision, 22 September 2026). A campaign launched after
+ * the window, or on a Sunday, starts at the next opening.
  */
-export const FIRST_SEND_HOUR = 10
-export const LAST_SEND_HOUR = 17
+export const FIRST_SEND_HOUR = 9
+export const LAST_SEND_HOUR = 18
 
 /**
  * The window as a person reads it.
  *
- * 17 is the last hour a send may *begin*, so the window runs to the end of
- * that hour. Written out once here rather than computed at each call site as
- * `LAST_SEND_HOUR + 1`, which read as "jusqu'à 18:00" and made users think
- * they could choose 18:00 as a start hour.
+ * 18 is the last hour a send may *begin*, so the window runs to the end of
+ * that hour: "19 h" is when it closes, and nothing starts at 19:00.
  */
-export const SEND_WINDOW_LABEL = '10:00–17:59'
+export const SEND_WINDOW_LABEL = 'du lundi au samedi, de 9 h à 19 h'
+
+/** Thirty seconds between two sends, plus jitter: the server's, not a setting. */
+export const PAUSE_MS = 30_000
+
+/** The zone the browser runs in: where the user is, and the campaign's clock. */
+export function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch {
+    return 'Europe/Paris'
+  }
+}
+
+/** Monday to Saturday, 09:00 to 18:59, on the browser's clock. */
+export function insideSendingWindow(at: Date): boolean {
+  const hour = at.getHours()
+  return at.getDay() !== 0 && hour >= FIRST_SEND_HOUR && hour <= LAST_SEND_HOUR
+}
+
+/** The next opening of the window at or after `from`, on the browser's clock. */
+export function nextOpening(from: Date): Date {
+  const at = new Date(from)
+
+  for (let step = 0; step < 8; step += 1) {
+    const opens = new Date(at)
+    opens.setHours(FIRST_SEND_HOUR, 0, 0, 0)
+
+    if (opens.getTime() >= from.getTime() && opens.getDay() !== 0) {
+      return opens
+    }
+
+    at.setDate(at.getDate() + 1)
+  }
+
+  return at
+}

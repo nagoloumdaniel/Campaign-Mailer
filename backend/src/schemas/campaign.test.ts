@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { createCampaignSchema, previewSchema, updateCampaignSchema } from './campaign.js'
+import {
+  createCampaignSchema,
+  insideSendingWindow,
+  previewSchema,
+  startCampaignSchema,
+  updateCampaignSchema,
+} from './campaign.js'
 
 const VALID = { name: 'Candidatures septembre' }
 
@@ -48,18 +54,10 @@ describe('createCampaignSchema', () => {
       ['mails_per_day at 0', { mails_per_day: 0 }, false],
       ['mails_per_day at 451', { mails_per_day: 451 }, false],
       ['mails_per_day fractional', { mails_per_day: 1.5 }, false],
-      // Office hours only: nothing is sent before 10:00 or after 17:59.
-      ['start_hour at 10', { start_hour: 10 }, true],
-      ['start_hour at 17', { start_hour: 17 }, true],
-      ['start_hour at 9', { start_hour: 9 }, false],
-      ['start_hour at 18', { start_hour: 18 }, false],
-      ['start_hour at 0', { start_hour: 0 }, false],
-      ['start_hour negative', { start_hour: -1 }, false],
-      ['pause_ms at 10000', { pause_ms: 10_000 }, true],
-      ['pause_ms at 9999', { pause_ms: 9_999 }, false],
-      ['pause_ms at the old 3000 default', { pause_ms: 3000 }, false],
-      ['pause_ms at 600000', { pause_ms: 600_000 }, true],
-      ['pause_ms at 600001', { pause_ms: 600_001 }, false],
+      // The start hour and the pause are the application's since
+      // 22 September 2026: a client may not send them at all.
+      ['start_hour at all', { start_hour: 9 }, false],
+      ['pause_ms at all', { pause_ms: 30_000 }, false],
     ]
 
     for (const [label, patch, expected] of cases) {
@@ -123,7 +121,7 @@ describe('createCampaignSchema', () => {
 
 describe('updateCampaignSchema', () => {
   it('accepts a single field', () => {
-    assert.equal(updateCampaignSchema.safeParse({ start_hour: 14 }).success, true)
+    assert.equal(updateCampaignSchema.safeParse({ mails_per_day: 20 }).success, true)
   })
 
   it('refuses an empty payload', () => {
@@ -132,7 +130,72 @@ describe('updateCampaignSchema', () => {
   })
 
   it('applies the same bounds as creation', () => {
-    assert.equal(updateCampaignSchema.safeParse({ start_hour: 18 }).success, false)
+    assert.equal(updateCampaignSchema.safeParse({ mails_per_day: 451 }).success, false)
+    assert.equal(updateCampaignSchema.safeParse({ pause_ms: 10_000 }).success, false)
+  })
+})
+
+describe('startCampaignSchema', () => {
+  const soon = () => new Date(Date.now() + 3_600_000).toISOString()
+
+  it('accepts no schedule at all: as soon as the window allows', () => {
+    assert.equal(startCampaignSchema.safeParse({}).success, true)
+  })
+
+  it('accepts a day and hour ahead, with the browser’s zone', () => {
+    assert.equal(
+      startCampaignSchema.safeParse({ send_after: soon(), timezone: 'Europe/Paris' })
+        .success,
+      true,
+    )
+  })
+
+  it('refuses a moment in the past, or beyond ninety days', () => {
+    const past = new Date(Date.now() - 3_600_000).toISOString()
+    const far = new Date(Date.now() + 91 * 86_400_000).toISOString()
+
+    assert.equal(startCampaignSchema.safeParse({ send_after: past }).success, false)
+    assert.equal(startCampaignSchema.safeParse({ send_after: far }).success, false)
+  })
+
+  it('refuses a date without its offset, which would be read in the server’s zone', () => {
+    assert.equal(
+      startCampaignSchema.safeParse({ send_after: '2026-10-01T10:00:00' }).success,
+      false,
+    )
+  })
+})
+
+describe('insideSendingWindow', () => {
+  // 1 July 2026 is a Wednesday; Paris is UTC+2 in summer.
+  it('opens at 09:00 and closes after 18:59, on the campaign’s clock', () => {
+    assert.equal(
+      insideSendingWindow(new Date('2026-07-01T06:59:00Z'), 'Europe/Paris'),
+      false,
+    )
+    assert.equal(
+      insideSendingWindow(new Date('2026-07-01T07:00:00Z'), 'Europe/Paris'),
+      true,
+    )
+    assert.equal(
+      insideSendingWindow(new Date('2026-07-01T16:59:00Z'), 'Europe/Paris'),
+      true,
+    )
+    assert.equal(
+      insideSendingWindow(new Date('2026-07-01T17:00:00Z'), 'Europe/Paris'),
+      false,
+    )
+  })
+
+  it('is open on Saturday and closed on Sunday', () => {
+    assert.equal(
+      insideSendingWindow(new Date('2026-07-04T10:00:00Z'), 'Europe/Paris'),
+      true,
+    )
+    assert.equal(
+      insideSendingWindow(new Date('2026-07-05T10:00:00Z'), 'Europe/Paris'),
+      false,
+    )
   })
 })
 

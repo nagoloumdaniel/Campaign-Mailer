@@ -56,6 +56,7 @@ function defaults(): CampaignRow {
     created_at: new Date('2026-09-12T10:00:00Z'),
     updated_at: new Date('2026-09-12T10:00:00Z'),
     scheduled_at: null,
+    send_after: null,
     started_at: null,
     completed_at: null,
   }
@@ -295,12 +296,22 @@ describe('POST /campaigns', () => {
   it('refuses an out-of-range cadence', async () => {
     const res = await send('/campaigns', {
       method: 'POST',
-      body: JSON.stringify({ name: 'x', start_hour: 24 }),
+      body: JSON.stringify({ name: 'x', mails_per_day: 451 }),
     })
 
     assert.equal(res.status, 400)
     const body = (await res.json()) as { details: { field: string }[] }
-    assert.equal(body.details[0]?.field, 'start_hour')
+    assert.equal(body.details[0]?.field, 'mails_per_day')
+  })
+
+  it('refuses a start hour or a pause: they are no longer the user’s', async () => {
+    for (const field of [{ start_hour: 9 }, { pause_ms: 30_000 }]) {
+      const res = await send('/campaigns', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'x', ...field }),
+      })
+      assert.equal(res.status, 400)
+    }
   })
 
   it('never echoes the submitted value back in the error', async () => {
@@ -479,6 +490,54 @@ describe('starting, pausing and resuming', () => {
     assert.equal(res.status, 200)
     assert.equal(await statusOf(res), 'scheduled')
     assert.deepEqual(dispatched, [CAMPAIGN])
+  })
+
+  it('stores the day and hour chosen, and the browser’s zone', async () => {
+    stored = ready()
+    // Next Wednesday at 11:00 in Paris, whatever today is.
+    const at = new Date()
+    at.setUTCDate(at.getUTCDate() + ((3 - at.getUTCDay() + 7) % 7 || 7))
+    at.setUTCHours(9, 0, 0, 0)
+
+    const res = await send(`/campaigns/${CAMPAIGN}/start`, {
+      method: 'POST',
+      body: JSON.stringify({ send_after: at.toISOString(), timezone: 'Europe/Paris' }),
+    })
+
+    assert.equal(res.status, 200)
+    const patch = lastPatch
+    assert.ok(patch?.send_after)
+    assert.equal(patch.send_after.toISOString(), at.toISOString())
+    assert.equal(patch.timezone, 'Europe/Paris')
+  })
+
+  it('launches as soon as possible when no day is chosen, clearing an old one', async () => {
+    stored = ready()
+
+    await post('start')
+
+    assert.equal(lastPatch?.send_after, null)
+  })
+
+  it('refuses a day and hour outside the sending week, with a code', async () => {
+    stored = ready()
+    // Next Sunday at noon in Paris.
+    const sunday = new Date()
+    sunday.setUTCDate(sunday.getUTCDate() + ((7 - sunday.getUTCDay()) % 7 || 7))
+    sunday.setUTCHours(10, 0, 0, 0)
+
+    const res = await send(`/campaigns/${CAMPAIGN}/start`, {
+      method: 'POST',
+      body: JSON.stringify({
+        send_after: sunday.toISOString(),
+        timezone: 'Europe/Paris',
+      }),
+    })
+
+    assert.equal(res.status, 400)
+    assert.equal(((await res.json()) as { code: string }).code, 'outside_send_window')
+    assert.equal(stored.status, 'draft')
+    assert.deepEqual(dispatched, [])
   })
 
   it('refuses to start a campaign with no subject, with 422', async () => {

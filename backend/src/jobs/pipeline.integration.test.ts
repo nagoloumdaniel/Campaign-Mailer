@@ -141,14 +141,19 @@ function engine(
 /**
  * Noon UTC today.
  *
- * Sending only happens between 10:00 and 17:59 on the campaign's own clock —
- * UTC for this fixture — and this suite runs whenever somebody runs it.
+ * Sending only happens Monday to Saturday, 09:00 to 18:59, on the campaign's
+ * own clock (UTC for this fixture), and this suite runs whenever somebody runs
+ * it.
  * Pinning the planner's clock to the middle of the window is what keeps these
  * tests about the pipeline rather than about the hour of the day. The two
  * cases that are about the hour pass their own instant.
  */
 function noonUtc(): Date {
   const at = new Date()
+  // Nothing goes out on Sunday: a run on a Sunday plans Saturday's noon.
+  if (at.getUTCDay() === 0) {
+    at.setUTCDate(at.getUTCDate() - 1)
+  }
   at.setUTCHours(12, 0, 0, 0)
   return at
 }
@@ -272,9 +277,9 @@ beforeEach(async () => {
 
   const campaign = await pool.query<{ id: string }>(
     `INSERT INTO campaigns (user_id, name, status, subject, body_html, body_text,
-                            mails_per_day, start_hour, timezone)
+                            mails_per_day, timezone)
      VALUES ($1, 'Pipeline', 'running', 'Bonjour {{contact_name|}}', '<p>Bonjour</p>', 'Bonjour',
-             450, 10, 'UTC')
+             450, 'UTC')
      RETURNING id`,
     [userId],
   )
@@ -496,22 +501,22 @@ describe(
 
     it('waits for the start hour in the campaign’s zone, then starts', async () => {
       await addContacts(3)
-      await pool.query(
-        "UPDATE campaigns SET status = 'scheduled', start_hour = 14 WHERE id = $1",
-        [campaignId],
-      )
+      await pool.query("UPDATE campaigns SET status = 'scheduled' WHERE id = $1", [
+        campaignId,
+      ])
       const queue = new FakeQueue()
 
-      // The worker plans again at 14:00 exactly, not at its next quarter-hour.
-      assert.deepEqual(await plan(queue, { now: new Date('2026-07-01T10:00:00Z') }), {
+      // 07:00 UTC on Wednesday 1 July: the worker plans again at 09:00 exactly,
+      // not at its next quarter-hour.
+      assert.deepEqual(await plan(queue, { now: new Date('2026-07-01T07:00:00Z') }), {
         kind: 'before_start_hour',
-        retryAt: new Date('2026-07-01T14:00:00Z'),
+        retryAt: new Date('2026-07-01T09:00:00Z'),
       })
       assert.equal((await campaignRow()).status, 'scheduled')
       assert.equal(queue.added, 0)
 
       assert.equal(
-        (await plan(queue, { now: new Date('2026-07-01T15:00:00Z') })).kind,
+        (await plan(queue, { now: new Date('2026-07-01T09:00:00Z') })).kind,
         'planned',
       )
       assert.equal((await campaignRow()).status, 'running')
@@ -525,21 +530,55 @@ describe(
       ])
       const queue = new FakeQueue()
 
-      // 18:30 UTC, past the last hour a send may begin. A campaign launched
+      // 19:30 UTC, past the last hour a send may begin. A campaign launched
       // in the evening starts the next morning; nothing goes out tonight, and
       // it is still only scheduled.
-      assert.deepEqual(await plan(queue, { now: new Date('2026-07-01T18:30:00Z') }), {
+      assert.deepEqual(await plan(queue, { now: new Date('2026-07-01T19:30:00Z') }), {
         kind: 'after_send_window',
-        retryAt: new Date('2026-07-02T10:00:00Z'),
+        retryAt: new Date('2026-07-02T09:00:00Z'),
       })
       assert.equal((await campaignRow()).status, 'scheduled')
       assert.equal(queue.added, 0)
 
       assert.equal(
-        (await plan(queue, { now: new Date('2026-07-02T10:30:00Z') })).kind,
+        (await plan(queue, { now: new Date('2026-07-02T09:30:00Z') })).kind,
         'planned',
       )
       assert.equal(queue.added, 3)
+    })
+
+    it('sends nothing on Sunday, and starts again on Monday at 09:00', async () => {
+      await addContacts(3)
+      const queue = new FakeQueue()
+
+      // Sunday 5 July, noon UTC.
+      assert.deepEqual(await plan(queue, { now: new Date('2026-07-05T12:00:00Z') }), {
+        kind: 'closed_day',
+        retryAt: new Date('2026-07-06T09:00:00Z'),
+      })
+      assert.equal(queue.added, 0)
+
+      // Saturday evening, past the window: the next opening skips Sunday too.
+      assert.deepEqual(await plan(queue, { now: new Date('2026-07-04T19:30:00Z') }), {
+        kind: 'after_send_window',
+        retryAt: new Date('2026-07-06T09:00:00Z'),
+      })
+    })
+
+    it('waits for the day and hour the launch was scheduled for', async () => {
+      await addContacts(3)
+      const sendAfter = new Date(Date.now() + 3 * 24 * 3600_000)
+      await pool.query(
+        "UPDATE campaigns SET status = 'scheduled', send_after = $2 WHERE id = $1",
+        [campaignId, sendAfter],
+      )
+      const queue = new FakeQueue()
+
+      // Inside today's window, but before the chosen moment: nothing planned,
+      // still scheduled, and the worker plans again at that very instant.
+      assert.deepEqual(await plan(queue), { kind: 'scheduled_later', retryAt: sendAfter })
+      assert.equal((await campaignRow()).status, 'scheduled')
+      assert.equal(queue.added, 0)
     })
   },
 )

@@ -1,9 +1,10 @@
 import type { Pool } from 'pg'
 
-import { atLocalHour } from './campaignStats.js'
+import { nextOpening } from './campaignStats.js'
 import {
   FREED_SLOT_MARGIN_MS,
   LAST_SEND_HOUR,
+  isSendDay,
   localHour,
   planDay,
   type PlanOutcome,
@@ -38,7 +39,11 @@ export interface DispatchDeps {
 }
 
 export type DispatchOutcome = (
-  PlanOutcome | { kind: 'not_dispatchable' } | { kind: 'completed' }
+  | PlanOutcome
+  | { kind: 'not_dispatchable' }
+  | { kind: 'completed' }
+  /** Launched for a later day and hour: nothing is planned before it. */
+  | { kind: 'scheduled_later' }
 ) & {
   /**
    * When planning this campaign again will find something to send: the start
@@ -57,6 +62,7 @@ interface DispatchRow {
   start_hour: number
   pause_ms: number
   timezone: string
+  send_after: Date | null
 }
 
 export async function listDispatchableCampaignIds(pool: Pool): Promise<string[]> {
@@ -78,7 +84,7 @@ export async function dispatchCampaign(
   const now = deps.now?.() ?? new Date()
 
   const { rows } = await pool.query<DispatchRow>(
-    `SELECT id, user_id, status, mails_per_day, start_hour, pause_ms, timezone
+    `SELECT id, user_id, status, mails_per_day, start_hour, pause_ms, timezone, send_after
      FROM campaigns WHERE id = $1`,
     [campaignId],
   )
@@ -88,24 +94,33 @@ export async function dispatchCampaign(
     return { kind: 'not_dispatchable' }
   }
 
+  // The day and hour the user chose. Checked before anything else, and before
+  // the campaign is moved to running, so it reads "programmée" until then.
+  if (campaign.send_after && campaign.send_after.getTime() > now.getTime()) {
+    return { kind: 'scheduled_later', retryAt: campaign.send_after }
+  }
+
   const hour = localHour(now, campaign.timezone)
 
-  // The start hour today, and tomorrow's, on the campaign's own clock.
-  const opensToday = () => atLocalHour(now, campaign.timezone, campaign.start_hour)
-  const opensTomorrow = () =>
-    atLocalHour(new Date(now.getTime() + DAY_MS), campaign.timezone, campaign.start_hour)
+  // The next time the window opens: today at the start hour, or the next
+  // morning that is not a Sunday.
+  const opens = () => nextOpening(now, campaign.timezone, campaign.start_hour)
+
+  if (!isSendDay(now, campaign.timezone)) {
+    return { kind: 'closed_day', retryAt: opens() }
+  }
 
   if (hour < campaign.start_hour) {
     // A scheduled campaign waits for its first morning in the user's zone; a
     // running one waits for the next.
-    return { kind: 'before_start_hour', retryAt: opensToday() }
+    return { kind: 'before_start_hour', retryAt: opens() }
   }
 
   // Checked before the campaign is moved to running, so a campaign launched at
-  // half past six in the evening still reads as "programmée" until it actually
-  // has something to send the next morning.
+  // half past seven in the evening still reads as "programmée" until it
+  // actually has something to send the next morning.
   if (hour > LAST_SEND_HOUR) {
-    return { kind: 'after_send_window', retryAt: opensTomorrow() }
+    return { kind: 'after_send_window', retryAt: opens() }
   }
 
   if (campaign.status === 'scheduled') {
@@ -184,8 +199,14 @@ export async function dispatchCampaign(
     return outcome
   }
 
-  if (outcome.kind === 'after_send_window') {
-    return { ...outcome, retryAt: opensTomorrow() }
+  if (outcome.kind === 'after_send_window' || outcome.kind === 'closed_day') {
+    // Everything that fit today is queued; the rest waits for the next opening,
+    // which is past the end of today's window.
+    const tomorrow = new Date(now.getTime() + 12 * 60 * 60 * 1000)
+    return {
+      ...outcome,
+      retryAt: nextOpening(tomorrow, campaign.timezone, campaign.start_hour),
+    }
   }
 
   if (outcome.kind === 'account_quota_reached') {

@@ -24,12 +24,12 @@ const MIN_MAILS_PER_DAY = 1
 export const MAX_MAILS_PER_DAY = 450
 
 /**
- * Ten seconds at least between two sends, thirty by default. A burst is what
- * gets an account flagged; the pace of a person writing is what does not.
+ * Thirty seconds between two sends, plus the planner's jitter, and not a
+ * setting: it is an anti-spam measure, and a field would invite shortening it
+ * (owner's decision, 22 September 2026). A burst is what gets an account
+ * flagged; the pace of a person writing is what does not.
  */
-export const MIN_PAUSE_MS = 10_000
 export const DEFAULT_PAUSE_MS = 30_000
-const MAX_PAUSE_MS = 600_000
 
 /**
  * An IANA zone name, and nothing else.
@@ -81,23 +81,33 @@ const timezone = z
   .refine(isTimeZone, { message: 'Unknown time zone' })
 
 /**
- * Office hours, on the campaign's own clock.
+ * Office hours, on the campaign's own clock: Monday to Saturday, 09:00 to
+ * 18:59 (owner's decision, 22 September 2026, replacing 10:00 to 17:59 every
+ * day). The rule is about how the message is received, not about Gmail's
+ * limits: a candidature that lands at three in the morning, or on a Sunday,
+ * reads as automated. `LAST` is the last hour a send may *begin*, so the
+ * window closes at the end of that hour.
  *
- * Nothing goes out before 10:00 or after 17:59. The rule is about how the
- * message is received, not about Gmail's limits: a candidature that lands at
- * three in the morning reads as automated. `LAST` is the last hour a send may
- * *begin*, so the window closes at the end of that hour.
+ * Mirrored in services/planner.ts, which cannot import the HTTP layer.
  */
-export const FIRST_SEND_HOUR = 10
-export const LAST_SEND_HOUR = 17
+export const FIRST_SEND_HOUR = 9
+export const LAST_SEND_HOUR = 18
+
+/**
+ * How far ahead a launch may be scheduled. Further than that, the list and the
+ * message are stale by the time it goes.
+ */
+const MAX_SCHEDULE_AHEAD_MS = 90 * 24 * 60 * 60 * 1000
 
 /** The same check, for a query string that names a zone the database will read. */
 export const ianaTimezone = timezone
 
+/**
+ * What of the pace a client may still set. The start hour and the pause are
+ * the application's; the zone is the browser's, sent without asking.
+ */
 const cadence = {
   mails_per_day: z.number().int().min(MIN_MAILS_PER_DAY).max(MAX_MAILS_PER_DAY),
-  start_hour: z.number().int().min(FIRST_SEND_HOUR).max(LAST_SEND_HOUR),
-  pause_ms: z.number().int().min(MIN_PAUSE_MS).max(MAX_PAUSE_MS),
   timezone,
 }
 
@@ -131,8 +141,6 @@ export const createCampaignSchema = z
     body_html: content.body_html.optional(),
     body_text: content.body_text.optional(),
     mails_per_day: cadence.mails_per_day.optional(),
-    start_hour: cadence.start_hour.optional(),
-    pause_ms: cadence.pause_ms.optional(),
     timezone: cadence.timezone.optional(),
   })
   // Unknown keys are refused rather than dropped. A typo in a field name would
@@ -158,12 +166,57 @@ export const updateCampaignSchema = createCampaignSchema
  * does afterwards.
  */
 export const CONTENT_FIELDS = ['name', 'subject', 'body_html', 'body_text'] as const
-export const CADENCE_FIELDS = [
-  'mails_per_day',
-  'start_hour',
-  'pause_ms',
-  'timezone',
-] as const
+export const CADENCE_FIELDS = ['mails_per_day', 'timezone'] as const
+
+/**
+ * A launch: now, or at a chosen day and hour. The zone is the browser's, so
+ * "Tuesday at 10:00" means the user's Tuesday; the campaign takes it.
+ *
+ * The chosen instant must fall inside the sending window on that clock and
+ * not in the past (a minute of grace for the click), or the campaign would sit
+ * scheduled for a moment it can never send in.
+ */
+export const startCampaignSchema = z
+  .object({
+    send_after: z.iso.datetime({ offset: true }).optional(),
+    timezone: timezone.optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.send_after) {
+      return
+    }
+
+    const at = new Date(value.send_after)
+    const now = Date.now()
+
+    if (at.getTime() < now - 60_000 || at.getTime() > now + MAX_SCHEDULE_AHEAD_MS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['send_after'],
+        message: 'Must be between now and 90 days ahead',
+      })
+    }
+    // Whether it falls inside the window is checked by the route, which knows
+    // the campaign's zone when the request does not carry one.
+  })
+
+export type StartCampaignInput = z.infer<typeof startCampaignSchema>
+
+/** Monday to Saturday, between the first and the last send hour, on `timezone`'s clock. */
+export function insideSendingWindow(at: Date, timezone: string): boolean {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    weekday: 'short',
+    hour: 'numeric',
+    hourCycle: 'h23',
+  }).formatToParts(at)
+
+  const weekday = parts.find((part) => part.type === 'weekday')?.value
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value)
+
+  return weekday !== 'Sun' && hour >= FIRST_SEND_HOUR && hour <= LAST_SEND_HOUR
+}
 
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>
 export type UpdateCampaignInput = z.infer<typeof updateCampaignSchema>

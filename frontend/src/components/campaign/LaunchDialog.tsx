@@ -1,22 +1,22 @@
-import type { ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 
+import { TextField } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
 import { ConfirmDialog } from '@/components/ui/Modal'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { Select } from '@/components/ui/Select'
 import {
+  FIRST_SEND_HOUR,
   LAST_SEND_HOUR,
   SEND_WINDOW_LABEL,
   estimateSchedule,
   fitsInOneDay,
+  insideSendingWindow,
+  nextOpening,
   remainingOf,
   type Campaign,
 } from '@/services/campaigns'
-import {
-  countOf,
-  formatDate,
-  formatDays,
-  formatHour,
-  formatNumber,
-} from '@/services/format'
+import { countOf, formatDate, formatDays, formatNumber } from '@/services/format'
 
 /**
  * The last screen before real e-mails leave a real mailbox.
@@ -27,10 +27,41 @@ import {
  * a sent message cannot be recalled, which is the one thing that makes this
  * dialog worth the extra click.
  *
- * The starting line is the one that surprises people, so it is computed
- * rather than described: launched at 18:30, a campaign says "demain à 10:00",
- * not "dès maintenant".
+ * The launch can wait for a chosen day and hour (owner's request, 22 September
+ * 2026). Only moments the campaign can actually send in are offered: Monday to
+ * Saturday, a quarter of an hour at a time from 09:00 to 18:45, on the
+ * computer's clock, which the campaign takes as its own. A Sunday picked in
+ * the calendar is refused with the reason, not silently moved.
  */
+
+type When = 'now' | 'later'
+
+/** Every quarter of an hour a launch may be scheduled for. */
+const TIMES = Array.from(
+  { length: (LAST_SEND_HOUR - FIRST_SEND_HOUR + 1) * 4 },
+  (_, index) => {
+    const hour = FIRST_SEND_HOUR + Math.floor(index / 4)
+    const minute = (index % 4) * 15
+    const value = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+    return { value, label: value.replace(':', ' h ') }
+  },
+)
+
+/** `YYYY-MM-DD` of a date on the browser's calendar, for a date input. */
+function dayValue(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${String(date.getFullYear())}-${month}-${day}`
+}
+
+const LONG_DATE = new Intl.DateTimeFormat('fr-FR', {
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
 export function LaunchDialog({
   campaign,
   open,
@@ -42,22 +73,57 @@ export function LaunchDialog({
   open: boolean
   busy: boolean
   onClose: () => void
-  onConfirm: () => void
+  /** The chosen instant as ISO, or null for as soon as the window allows. */
+  onConfirm: (sendAfter: string | null) => void
 }) {
   const remaining = remainingOf(campaign)
   const schedule = estimateSchedule(campaign)
   const attachments = campaign.attachments ?? []
 
+  // The first opening from tomorrow: a sensible default for "later".
+  const defaultDay = useMemo(() => {
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    return dayValue(nextOpening(tomorrow))
+  }, [])
+
+  // Read once when the dialog opens: the render itself stays pure.
+  const [openedAt] = useState(() => Date.now())
+  const [when, setWhen] = useState<When>('now')
+  const [day, setDay] = useState(defaultDay)
+  const [time, setTime] = useState('09:00')
+
+  const chosen = new Date(`${day}T${time}:00`)
+  const problem =
+    when === 'later'
+      ? Number.isNaN(chosen.getTime())
+        ? 'Choisissez une date.'
+        : chosen.getTime() <= openedAt
+          ? 'Ce moment est déjà passé : choisissez une date à venir.'
+          : !insideSendingWindow(chosen)
+            ? 'Rien ne part le dimanche : choisissez un jour du lundi au samedi.'
+            : null
+      : null
+
   return (
     <ConfirmDialog
       open={open}
       onClose={onClose}
-      onConfirm={onConfirm}
+      onConfirm={() => {
+        if (problem) {
+          return
+        }
+        onConfirm(when === 'later' ? chosen.toISOString() : null)
+      }}
       busy={busy}
       icon="send"
       size="md"
       title="Lancer cette campagne ?"
-      confirmLabel={`Lancer les ${formatNumber(remaining)} envois`}
+      confirmLabel={
+        when === 'later'
+          ? `Programmer les ${formatNumber(remaining)} envois`
+          : `Lancer les ${formatNumber(remaining)} envois`
+      }
       description={
         <>
           {countOf(remaining, 'e-mail')} partiront de votre compte Gmail, un par un. Un
@@ -65,6 +131,33 @@ export function LaunchDialog({
         </>
       }
     >
+      <SegmentedControl
+        value={when}
+        onChange={setWhen}
+        label="Quand envoyer"
+        className="mb-3 w-full"
+        segments={[
+          { value: 'now', label: 'Dès que possible', icon: 'send' },
+          { value: 'later', label: 'Programmer', icon: 'calendar' },
+        ]}
+      />
+
+      {when === 'later' && (
+        <div className="mb-3 grid gap-3 sm:grid-cols-2">
+          <TextField
+            label="Jour"
+            type="date"
+            min={dayValue(new Date())}
+            value={day}
+            onChange={(event) => {
+              setDay(event.target.value)
+            }}
+            error={problem}
+          />
+          <Select label="Heure" value={time} onChange={setTime} options={TIMES} />
+        </div>
+      )}
+
       <dl className="divide-y divide-border overflow-hidden rounded-xl border border-border text-[13px]">
         <Row label="Destinataires" icon="users">
           {countOf(remaining, 'contact')} en attente
@@ -83,15 +176,20 @@ export function LaunchDialog({
         </Row>
 
         <Row label="Premier envoi" icon="clock">
-          {startingSentence(campaign)}
+          {when === 'later'
+            ? problem
+              ? '—'
+              : `Le ${LONG_DATE.format(chosen)}`
+            : startingSentence()}
         </Row>
 
         {/* A list that fits in one day has no pace to speak of: it all goes
             out in one sitting. */}
         {schedule && !fitsInOneDay(campaign) && (
           <Row label="Durée estimée" icon="calendar">
-            {formatDays(schedule.days)}, environ {formatNumber(campaign.mailsPerDay)} par
-            jour · fin vers le {formatDate(schedule.lastDay)}
+            {formatDays(schedule.days)} d’envoi, environ{' '}
+            {formatNumber(campaign.mailsPerDay)} par jour · fin vers le{' '}
+            {formatDate(schedule.lastDay)}
           </Row>
         )}
       </dl>
@@ -99,43 +197,36 @@ export function LaunchDialog({
       <p className="mt-3 flex items-start gap-2 rounded-xl bg-surface-2 px-3.5 py-2.5 text-xs leading-relaxed text-ink-muted">
         <Icon name="info" size={13} className="mt-px shrink-0" />
         <span>
-          Vous pourrez mettre la campagne en pause à tout moment. Le message et les
-          contacts, en revanche, ne seront plus modifiables une fois lancée.
+          Les envois ont lieu {SEND_WINDOW_LABEL}, à l’heure de votre ordinateur. Vous
+          pourrez mettre la campagne en pause à tout moment ; le message et les contacts,
+          en revanche, ne seront plus modifiables une fois lancée.
         </span>
       </p>
     </ConfirmDialog>
   )
 }
 
-/**
- * When the first message actually goes out.
- *
- * Read from the browser's clock against the campaign's own hours, which is an
- * approximation when the two are in different zones — and said as one, with
- * the zone named, rather than stated as a fact the worker might contradict.
- */
-function startingSentence(campaign: Campaign): string {
-  const hourNow = Number(
-    new Intl.DateTimeFormat('en-GB', {
-      timeZone: campaign.timezone,
-      hour: 'numeric',
-      hourCycle: 'h23',
-    }).format(new Date()),
-  )
+/** When the first message goes out if launched now, on the browser's clock. */
+function startingSentence(): string {
+  const now = new Date()
 
-  const zone = campaign.timezone.replace(/_/g, ' ')
-
-  if (hourNow < campaign.startHour) {
-    return `Aujourd’hui à ${formatHour(campaign.startHour)} (${zone})`
+  if (insideSendingWindow(now)) {
+    return 'Dans quelques instants'
   }
 
-  if (hourNow > LAST_SEND_HOUR) {
-    // The window closed for today. Nothing goes out this evening, whatever
-    // the start hour says.
-    return `Demain à ${formatHour(campaign.startHour)} (${zone}) — la plage ${SEND_WINDOW_LABEL} est passée`
+  const opens = nextOpening(now)
+  const tomorrow = new Date(now)
+  tomorrow.setDate(now.getDate() + 1)
+
+  if (opens.toDateString() === now.toDateString()) {
+    return 'Aujourd’hui à 9 h 00'
   }
 
-  return `Dans quelques instants (${zone})`
+  if (opens.toDateString() === tomorrow.toDateString()) {
+    return 'Demain à 9 h 00'
+  }
+
+  return `Le ${LONG_DATE.format(opens)} (rien ne part le dimanche)`
 }
 
 function Row({

@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { atLocalHour, estimateSchedule, type ScheduleInput } from './campaignStats.js'
+import {
+  atLocalHour,
+  estimateSchedule,
+  nextOpening,
+  type ScheduleInput,
+} from './campaignStats.js'
 
 const PARIS = 'Europe/Paris'
 const at = (iso: string) => new Date(iso)
@@ -141,5 +146,53 @@ describe('the estimated end', () => {
     )
     const dayFourStart = at('2026-07-04T07:00:00Z').getTime()
     assert.equal(estimatedEndAt?.getTime(), dayFourStart + 1 * 33_000)
+  })
+})
+
+describe('the sending week', () => {
+  it('opens the next morning that is not a Sunday', () => {
+    // Saturday 4 July at 19:30 in Paris: nothing until Monday 09:00.
+    assert.equal(
+      nextOpening(at('2026-07-04T17:30:00Z'), PARIS, 9).toISOString(),
+      '2026-07-06T07:00:00.000Z',
+    )
+    // Sunday noon, the same.
+    assert.equal(
+      nextOpening(at('2026-07-05T10:00:00Z'), PARIS, 9).toISOString(),
+      '2026-07-06T07:00:00.000Z',
+    )
+    // Wednesday at 07:00 in Paris: the same morning.
+    assert.equal(
+      nextOpening(at('2026-07-01T05:00:00Z'), PARIS, 9).toISOString(),
+      '2026-07-01T07:00:00.000Z',
+    )
+  })
+
+  it('estimates a Sunday send on Monday morning', () => {
+    const { nextSendAt } = estimateSchedule(input({ now: at('2026-07-05T10:00:00Z') }))
+    assert.equal(nextSendAt?.toISOString(), '2026-07-06T07:00:00.000Z')
+  })
+
+  it('counts a multi-day campaign in sending days, Sundays skipped', () => {
+    // Saturday noon, 92 left at 46 a day: Saturday, then Monday, not Sunday.
+    const { estimatedEndAt } = estimateSchedule(
+      input({ now: at('2026-07-04T10:00:00Z'), pending: 92 }),
+    )
+    assert.equal(estimatedEndAt?.toISOString().slice(0, 10), '2026-07-06')
+  })
+})
+
+describe('a launch scheduled for later', () => {
+  it('sends nothing before the day and hour chosen', () => {
+    const sendAfter = at('2026-07-03T08:30:00Z')
+    const { nextSendAt } = estimateSchedule(input({ status: 'scheduled', sendAfter }))
+    assert.equal(nextSendAt?.toISOString(), sendAfter.toISOString())
+  })
+
+  it('is ignored once it has passed', () => {
+    const { nextSendAt } = estimateSchedule(
+      input({ sendAfter: at('2026-06-30T08:30:00Z') }),
+    )
+    assert.equal(nextSendAt?.toISOString(), '2026-07-01T10:00:00.000Z')
   })
 })

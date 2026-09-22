@@ -112,14 +112,16 @@ describe(
       assert.equal(preview.contact.salutation, 'Madame')
     })
 
-    it('refuses a start hour outside the day, even without the API', async () => {
+    it('refuses any start hour but the opening of the window, even without the API', async () => {
       // The CHECK constraint is the boundary a script cannot walk around.
-      await assert.rejects(
-        pool.query(
-          'INSERT INTO campaigns (user_id, name, start_hour) VALUES ($1, $2, $3)',
-          [userId, 'Mauvaise heure', 24],
-        ),
-      )
+      for (const hour of [10, 24]) {
+        await assert.rejects(
+          pool.query(
+            'INSERT INTO campaigns (user_id, name, start_hour) VALUES ($1, $2, $3)',
+            [userId, 'Mauvaise heure', hour],
+          ),
+        )
+      }
     })
 
     it('refuses a pace the account cannot bear, even without the API', async () => {
