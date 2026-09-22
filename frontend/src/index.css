@@ -230,11 +230,61 @@
 }
 
 /* The floating navigation, and anything else that sits over scrolling
-   content: a surface you can almost see through, held up by a hairline. */
+   content: a surface you can almost see through, held up by a hairline.
+   `--glass-tint` is how much of the surface stays in front of the page. The
+   default suits a toolbar whose own controls have to be read first; the
+   navigation, which spans the whole page and wants to show what passes under
+   it, lowers it and blurs harder to pay for the legibility. */
 @utility glass {
-  background-color: color-mix(in oklab, var(--color-surface) 72%, transparent);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  background-color: color-mix(
+    in oklab,
+    var(--color-surface) var(--glass-tint, 72%),
+    transparent
+  );
+  backdrop-filter: blur(var(--glass-blur, 16px)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 16px)) saturate(180%);
+}
+
+/* The band the navigation floats in.
+   The bar is glass, but the page also scrolls through the gap above and around
+   it, and content crossing that gap in full focus makes the bar read as pasted
+   on rather than laid over. Two blurred layers under fading masks stand in for
+   a progressive blur — heavy behind the bar, light just below it, gone after
+   that — so a card sliding underneath dissolves instead of crossing a line.
+   Two layers rather than the usual stack of five: over four rem of height the
+   difference is not visible, and each layer is a full-width backdrop filter
+   recomputed on every scrolled frame. */
+@utility nav-veil {
+  pointer-events: none;
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: calc(100% + 1.75rem);
+  transition: opacity 300ms var(--ease-out);
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+
+  /* The light pass reaches furthest down, so focus comes back over a distance
+     rather than at an edge. */
+  &::before {
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+    -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+  }
+
+  /* The heavy pass stops just under the bar. */
+  &::after {
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 48%, transparent 80%);
+    mask-image: linear-gradient(to bottom, #000 48%, transparent 80%);
+  }
 }
 
 /* A panel that arrives inside a page the user is already reading. */

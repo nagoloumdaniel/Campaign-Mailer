@@ -18,6 +18,13 @@ import { UserMenu } from './UserMenu'
  * there is nothing to separate it from, and a permanent shadow there is the
  * detail that makes an interface look printed on.
  *
+ * The blur is not the bar's alone: `nav-veil` blurs the whole band the bar
+ * floats in, gap included, and fades out a little below it. Without it a
+ * heading rose through the twelve pixels above the bar in full focus, which is
+ * exactly where the illusion breaks. Like the border, it arrives with the
+ * scroll: at the top of the page there is only the canvas behind it, and
+ * blurring a flat colour costs a full-width filter every frame for nothing.
+ *
  * Four destinations and no more. Everything else in the application is
  * reached from one of them, and a navigation with seven entries is a
  * navigation nobody reads. Contacts joined on 22 September 2026: once an
@@ -49,12 +56,17 @@ export function Navbar() {
 
   return (
     <header className="sticky top-0 z-40 px-3 pt-3 sm:px-5 sm:pt-4">
+      <div
+        aria-hidden="true"
+        className={`nav-veil ${scrolled ? 'opacity-100' : 'opacity-0'}`}
+      />
+
       {/* The destinations are placed on the bar's exact centre, independently
           of the logo on the left and the account controls on the right. A
           three-column grid did not hold on a phone: the right column's minimum
           width, wider than the left's, pulled the links off centre. */}
       <div
-        className={`relative mx-auto flex h-14 max-w-6xl items-center justify-between gap-1.5 rounded-2xl glass px-2 transition-[box-shadow,border-color] duration-300 ease-out sm:gap-3 sm:px-3.5 ${
+        className={`relative mx-auto flex h-14 max-w-6xl items-center justify-between gap-1.5 rounded-2xl glass px-2 transition-[box-shadow,border-color] duration-300 ease-out [--glass-blur:24px] [--glass-tint:60%] sm:gap-3 sm:px-3.5 ${
           scrolled
             ? 'border border-border shadow-card'
             : 'border border-transparent shadow-none'
