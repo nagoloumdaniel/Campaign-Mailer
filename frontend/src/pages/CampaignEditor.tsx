@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -57,6 +57,48 @@ function EditorFallback() {
   )
 }
 
+/** How long after the last keystroke the message is saved. */
+const SAVE_AFTER_MS = 1200
+
+/**
+ * Where the automatic save stands, in the header where the button used to be.
+ * A failure keeps the work on screen and offers to try again; it never loses
+ * what was typed.
+ */
+function SaveStatus({
+  saving,
+  dirty,
+  failed,
+  onRetry,
+}: {
+  saving: boolean
+  dirty: boolean
+  failed: boolean
+  onRetry: () => void
+}) {
+  if (failed) {
+    return (
+      <Button variant="secondary" icon="refresh" onClick={onRetry}>
+        Réessayer l’enregistrement
+      </Button>
+    )
+  }
+
+  return (
+    <span
+      aria-live="polite"
+      className="inline-flex h-10 items-center gap-1.5 px-2 text-[13px] text-ink-muted"
+    >
+      <Icon
+        name={saving || dirty ? 'refresh' : 'check-circle'}
+        size={15}
+        className={saving ? 'animate-spin motion-reduce:animate-none' : 'text-success'}
+      />
+      {saving ? 'Enregistrement…' : dirty ? 'Modifications en cours' : 'Enregistré'}
+    </span>
+  )
+}
+
 type Load =
   | { state: 'loading' }
   | { state: 'ready'; campaign: Campaign }
@@ -98,6 +140,12 @@ export function CampaignEditor() {
   const [previewContacts, setPreviewContacts] = useState<Contact[]>([])
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveFailed, setSaveFailed] = useState(false)
+  /** The draft on screen, read by a save that finishes after more typing. */
+  const latestDraft = useRef(draft)
+  useEffect(() => {
+    latestDraft.current = draft
+  }, [draft])
   const [deleting, setDeleting] = useState(false)
   const [pane, setPane] = useState<'edit' | 'preview'>('edit')
   /** Bumped when contacts change, so the table and the counters reload together. */
@@ -238,29 +286,47 @@ export function CampaignEditor() {
     }
   }, [dirty])
 
-  async function save() {
-    if (load.state !== 'ready' || saving) {
+  /**
+   * Saves the message a moment after the last keystroke (owner's request,
+   * 22 September 2026): there is no button to forget. A save that finishes
+   * while the user kept typing leaves the campaign marked unsaved, so the next
+   * pause saves the rest; nothing typed is ever dropped.
+   */
+  const save = useCallback(async () => {
+    if (load.state !== 'ready') {
       return
     }
 
+    const snapshot = latestDraft.current
     setSaving(true)
 
     try {
       const campaign = await campaignsApi.update(load.campaign.id, {
-        subject: draft.subject,
-        body_html: draft.bodyHtml,
-        body_text: draft.bodyText,
+        subject: snapshot.subject,
+        body_html: snapshot.bodyHtml,
+        body_text: snapshot.bodyText,
       })
 
       setLoad({ state: 'ready', campaign })
-      setDirty(false)
-      toast.success('Message enregistré.')
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'L’enregistrement a échoué.')
+      setDirty(latestDraft.current !== snapshot)
+      setSaveFailed(false)
+    } catch {
+      setSaveFailed(true)
     } finally {
       setSaving(false)
     }
-  }
+  }, [load])
+
+  useEffect(() => {
+    if (!dirty || saving || saveFailed) {
+      return
+    }
+
+    const timer = window.setTimeout(() => void save(), SAVE_AFTER_MS)
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [dirty, saving, saveFailed, draft, save])
 
   async function changeType(type: CampaignType) {
     if (load.state !== 'ready') {
@@ -334,15 +400,15 @@ export function CampaignEditor() {
         action={
           <>
             {editable && (
-              <Button
-                variant="primary"
-                icon="check"
-                loading={saving}
-                disabled={!dirty}
-                onClick={() => void save()}
-              >
-                {dirty ? 'Enregistrer' : 'À jour'}
-              </Button>
+              <SaveStatus
+                saving={saving}
+                dirty={dirty}
+                failed={saveFailed}
+                onRetry={() => {
+                  setSaveFailed(false)
+                  void save()
+                }}
+              />
             )}
             {campaign.status !== 'running' && (
               <IconButton
@@ -421,10 +487,12 @@ export function CampaignEditor() {
                 onSubjectChange={(subject) => {
                   setDraft((current) => ({ ...current, subject }))
                   setDirty(true)
+                  setSaveFailed(false)
                 }}
                 onBodyChange={(bodyHtml, bodyText) => {
                   setDraft((current) => ({ ...current, bodyHtml, bodyText }))
                   setDirty(true)
+                  setSaveFailed(false)
                 }}
               />
             </Suspense>

@@ -54,10 +54,8 @@ test('a user prepares a campaign, launches it and follows it to the end', async 
     await page.getByLabel('Objet').fill('Candidature chez {{company_name|votre équipe}}')
     await page.locator('.ql-editor').fill('Bonjour {{contact_name|Madame, Monsieur}},')
 
-    // Exact: the cadence panel below has "Enregistrer le rythme".
-    await page.getByRole('button', { name: 'Enregistrer', exact: true }).click()
-    // Said in two places once saved — the header button and the cadence note.
-    await expect(page.getByText('À jour').first()).toBeVisible()
+    // No button: the message saves itself a moment after the last keystroke.
+    await expect(page.getByText('Enregistré', { exact: true })).toBeVisible()
   })
 
   await test.step('the preview renders the message without being asked', async () => {
