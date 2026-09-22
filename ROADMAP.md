@@ -4,7 +4,8 @@ Plan d'exécution de A à Z, du repo vide jusqu'au lancement public.
 Référence : `Cahier des Charges — Campaign Mailer v1.0`.
 
 - **Statut** : Phases 0 à 6 terminées (Phase 6 validée par le propriétaire le 15 septembre 2026). Phase 7 livrée le 15 septembre 2026, en attente de revue ; deux critères de sa Definition of Done (la CI exécute les tests, le parcours end-to-end passe en CI) restent invérifiables tant que GitHub Actions est désactivé sur le compte, et la remontée d'une erreur dans Sentry attend le DSN du projet. Phase 4 validée par le propriétaire le 14 septembre 2026, après le test réel (#67 : 5 emails sur 5 acceptés par Gmail, espacés de 11 s, aucun doublon). Reste ouvert en Phase 0 : les deux clés Cloudflare R2 et la demande de vérification Google.
-- **Dernière mise à jour** : 15 septembre 2026
+- **22 septembre 2026, hors phase** : envoi à la seconde près (le planificateur tournait toutes les 15 minutes, un envoi prévu à 10:00 partait à 10:13), compte à rebours en temps réel du prochain envoi, rythme journalier masqué quand la campagne tient en une journée, nouvel aperçu du message. En Phase 9, ajout de la vérification des destinataires et de l'intégration avec MailFind.
+- **Dernière mise à jour** : 22 septembre 2026
 - **Cadence de révision** : fin de chaque phase
 
 ---
@@ -520,6 +521,34 @@ C'est la phase la plus risquée du projet. Elle mérite le plus de tests, et la 
   → skills : `brainstorming`, `test-driven-development`, `systematic-debugging`
 - Rate limiting intelligent : détection de dégradation d'envoi et pause automatique.
   → skills : `brainstorming`, `analytics`, `test-driven-development`
+
+**Vérification des destinataires** (décidé le 22 septembre 2026 : vérification à l'import, puis revalidation au lancement) :
+
+- Vérification locale à l'import du CSV et à l'ajout manuel : syntaxe, existence du domaine, enregistrements MX, domaines jetables connus, adresses de rôle. Gratuite, faite par le backend (`node:dns`), sans service tiers. Un statut par contact : `valid`, `risky`, `invalid`, `unknown`, avec la date et le motif. Migration avec rollback.
+  → skills : `brainstorming`, `test-driven-development`, `migration`, `security-review`
+- Revalidation au lancement : toute adresse vérifiée il y a plus de 30 jours est revérifiée avant que la campagne parte. `LaunchDialog` affiche le décompte (valides, à risque, exclues) avant le clic.
+  → skills : `test-driven-development`, `frontend-design`, `verification-before-completion`
+- Exclusion des adresses `invalid` au lancement, décision explicite de l'utilisateur pour les adresses `risky` (accept-all, rôle, inconnu). Une adresse exclue passe au statut `ignored` avec son motif, jamais supprimée en silence.
+  → skills : `test-driven-development`, `emil-design-eng`
+- Liste de suppression par compte : une adresse qui a répondu « stop », rejetée ou retirée à la main n'est plus jamais importée ni envoyée. Contrôlée à l'import et dans le moteur d'envoi, avant la réclamation du contact.
+  → skills : `brainstorming`, `test-driven-development`, `migration`, `security-review`
+- Vérification SMTP déléguée à MailFind (voir le bloc suivant) : la vérification de boîte ne peut pas être faite depuis Railway, qui bloque le port 25 sortant, et sonder des serveurs de messagerie depuis l'IP du backend dégraderait sa réputation. Option par compte, désactivée par défaut, mentionnée comme sous-traitant dans la politique de confidentialité.
+  → skills : `brainstorming`, `security-review`, `test-driven-development`
+
+**Intégration avec MailFind** (projet séparé, décidé le 22 septembre 2026, dépôt `MailFind`) :
+
+MailFind collecte les adresses professionnelles des entreprises et les vérifie. Campaign Mailer reste l'outil d'envoi. Le lien entre les deux passe par une API versionnée, jamais par une base partagée : chaque application garde son propre modèle de données et ses propres risques.
+
+- Jetons d'intégration personnels : créés et révoqués depuis la page Compte, affichés une seule fois, stockés hachés (SHA-256), portée limitée (`campaigns:write`, `contacts:write`), date de dernière utilisation. Aucune session Google n'est partagée avec MailFind.
+  → skills : `brainstorming`, `security-review`, `test-driven-development`, `migration`
+- API publique `v1` sous `/api/v1`, authentifiée par jeton : `POST /api/v1/campaigns` crée un brouillon avec ses contacts, `POST /api/v1/campaigns/:id/contacts` ajoute des contacts à un brouillon. Mêmes règles que l'import CSV (validation, doublons, 2 000 lignes par appel comme `IMPORT_BATCH_LIMIT`), en-tête `Idempotency-Key` obligatoire, limitation de débit par jeton. Une campagne créée par l'API reste un brouillon : seul l'utilisateur la lance, depuis l'interface.
+  → skills : `anthropic-skills:nodejs-backend-patterns`, `test-driven-development`, `security-review`
+- Champs transmis par MailFind : `email`, `contact_name`, `company_name`, `salutation`, et en plus `source` (URL où l'adresse a été trouvée), `verification_status` et `verified_at`. Ces trois champs alimentent directement le statut de vérification ci-dessus, sans revérifier une adresse vérifiée par MailFind depuis moins de 30 jours.
+  → skills : `test-driven-development`, `migration`
+- Documentation OpenAPI de l'API `v1`, publiée avec l'application, et tests de contrat partagés avec MailFind.
+  → skills : `anthropic-skills:write-api-reference`, `anthropic-skills:openapi-regen`
+- Interface : un encart « Importé depuis MailFind » sur la campagne, avec l'entreprise et la source de chaque contact dans le tableau des contacts.
+  → skills : `frontend-design`, `composition-patterns`
 
 **Priorité moyenne** :
 
