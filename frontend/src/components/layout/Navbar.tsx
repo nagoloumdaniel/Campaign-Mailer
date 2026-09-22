@@ -49,8 +49,11 @@ export function Navbar() {
 
   return (
     <header className="sticky top-0 z-40 px-3 pt-3 sm:px-5 sm:pt-4">
+      {/* Three columns, the outer two of equal width, so the destinations sit
+          on the true centre of the bar whatever the logo and the account menu
+          measure, on a phone as on a desktop. */}
       <div
-        className={`mx-auto flex h-14 max-w-6xl items-center gap-2 rounded-2xl glass px-2.5 transition-[box-shadow,border-color] duration-300 ease-out sm:gap-3 sm:px-3.5 ${
+        className={`mx-auto grid h-14 max-w-6xl grid-cols-[1fr_auto_1fr] items-center gap-1.5 rounded-2xl glass px-2 transition-[box-shadow,border-color] duration-300 ease-out sm:gap-3 sm:px-3.5 ${
           scrolled
             ? 'border border-border shadow-card'
             : 'border border-transparent shadow-none'
@@ -58,19 +61,19 @@ export function Navbar() {
       >
         <Link
           to="/"
-          className="flex shrink-0 items-center gap-2 rounded-lg pr-1 pl-1 text-ink"
+          className="flex min-w-0 items-center gap-2 justify-self-start rounded-lg pr-1 pl-1 text-ink"
           aria-label="Campaign Mailer, accueil"
         >
           <Logo size={26} />
           {/* The name disappears first when space runs out: the mark alone
               still identifies the product, a truncated name does not. */}
-          <span className="hidden font-display text-[15px] font-semibold tracking-tight sm:block">
+          <span className="hidden truncate font-display text-[15px] font-semibold tracking-tight lg:block">
             Campaign&nbsp;Mailer
           </span>
         </Link>
 
-        <nav aria-label="Navigation principale" className="ms-1 min-w-0 sm:ms-3">
-          <ul className="flex items-center gap-0.5 sm:gap-1">
+        <nav aria-label="Navigation principale" className="min-w-0">
+          <ul className="flex items-center justify-center gap-0.5 sm:gap-1">
             {NAV.map((item) => (
               <li key={item.to}>
                 <NavItem {...item} />
@@ -79,7 +82,7 @@ export function Navbar() {
           </ul>
         </nav>
 
-        <div className="ms-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
+        <div className="flex shrink-0 items-center gap-1 justify-self-end sm:gap-1.5">
           <ThemeToggle />
           <UserMenu />
         </div>
