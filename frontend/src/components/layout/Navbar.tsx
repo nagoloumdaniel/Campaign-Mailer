@@ -54,7 +54,7 @@ export function Navbar() {
           three-column grid did not hold on a phone: the right column's minimum
           width, wider than the left's, pulled the links off centre. */}
       <div
-        className={`relative mx-auto flex h-14 max-w-6xl items-center justify-between gap-1.5 rounded-2xl glass px-2 transition-[box-shadow,border-color] duration-300 ease-out sm:gap-3 sm:px-3.5 ${
+        className={`relative mx-auto flex h-14 max-w-6xl items-center justify-between gap-1.5 rounded-2xl glass px-2 transition-[box-shadow,border-color] duration-300 ease-out glass-nav sm:gap-3 sm:px-3.5 ${
           scrolled
             ? 'border border-border shadow-card'
             : 'border border-transparent shadow-none'

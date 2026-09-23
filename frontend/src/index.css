@@ -230,11 +230,32 @@
 }
 
 /* The floating navigation, and anything else that sits over scrolling
-   content: a surface you can almost see through, held up by a hairline. */
+   content: a surface you can almost see through, held up by a hairline.
+   The share of surface kept in front of the page is a knob, because a pane
+   over a table wants to be read before what it covers, and the navigation
+   wants the opposite. */
 @utility glass {
-  background-color: color-mix(in oklab, var(--color-surface) 72%, transparent);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  background-color: color-mix(
+    in oklab,
+    var(--color-surface) var(--glass-tint, 72%),
+    transparent
+  );
+  backdrop-filter: blur(var(--glass-blur, 16px)) saturate(var(--glass-saturation, 180%));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 16px))
+    saturate(var(--glass-saturation, 180%));
+}
+
+/* The navigation's own settings. At the default 72 % the blur is real and
+   imperceptible: the bar covers a white card on a near-white canvas, which
+   blurs to the same white, so the pane reads as a solid slab. Lowering the
+   tint is what makes a heading or a coloured button passing underneath
+   arrive as a wash instead of crossing the bar in full focus; the wider
+   blur and the raised saturation keep that wash soft and coloured rather
+   than a grey smudge. */
+@utility glass-nav {
+  --glass-tint: 55%;
+  --glass-blur: 28px;
+  --glass-saturation: 200%;
 }
 
 /* A panel that arrives inside a page the user is already reading. */
