@@ -11,20 +11,18 @@ import { UserMenu } from './UserMenu'
 /**
  * The floating navigation.
  *
- * It sits over the page rather than on top of it: a translucent bar with a
- * blur behind it, held up by a hairline, so the content scrolling underneath
- * stays visible and the bar reads as a layer rather than as a lid. The border
- * and the shadow only appear once the page has actually scrolled — at the top
- * there is nothing to separate it from, and a permanent shadow there is the
- * detail that makes an interface look printed on.
+ * A translucent glass navigation with backdrop blur, allowing the content
+ * behind it to remain visible while appearing softly diffused.
  *
- * Four destinations and no more. Everything else in the application is
- * reached from one of them, and a navigation with seven entries is a
- * navigation nobody reads. Contacts joined on 22 September 2026: once an
- * account holds several campaigns, "who do I already have" is its own question.
+ * The border and shadow become more pronounced once the page scrolls.
  */
 
-const NAV: { to: string; label: string; icon: IconName; end?: boolean }[] = [
+const NAV: {
+  to: string
+  label: string
+  icon: IconName
+  end?: boolean
+}[] = [
   { to: '/', label: 'Accueil', icon: 'home', end: true },
   { to: '/campaigns', label: 'Campagnes', icon: 'send' },
   { to: '/contacts', label: 'Contacts', icon: 'users' },
@@ -40,6 +38,7 @@ export function Navbar() {
     }
 
     onScroll()
+
     window.addEventListener('scroll', onScroll, { passive: true })
 
     return () => {
@@ -49,15 +48,11 @@ export function Navbar() {
 
   return (
     <header className="sticky top-0 z-40 px-3 pt-3 sm:px-5 sm:pt-4">
-      {/* The destinations are placed on the bar's exact centre, independently
-          of the logo on the left and the account controls on the right. A
-          three-column grid did not hold on a phone: the right column's minimum
-          width, wider than the left's, pulled the links off centre. */}
       <div
-        className={`relative mx-auto flex h-14 max-w-6xl items-center justify-between gap-1.5 rounded-2xl glass px-2 transition-[box-shadow,border-color] duration-300 ease-out glass-nav sm:gap-3 sm:px-3.5 ${
+        className={`relative mx-auto flex h-14 max-w-6xl items-center justify-between gap-1.5 rounded-2xl px-2 transition-[background-color,box-shadow,border-color,backdrop-filter] duration-300 ease-out sm:gap-3 sm:px-3.5 ${
           scrolled
-            ? 'border border-border shadow-card'
-            : 'border border-transparent shadow-none'
+            ? 'bg-background/65 border border-border/60 shadow-card backdrop-blur-2xl'
+            : 'bg-background/45 border border-white/20 shadow-none backdrop-blur-xl dark:border-white/10'
         }`}
       >
         <Link
@@ -66,8 +61,7 @@ export function Navbar() {
           aria-label="Campaign Mailer, accueil"
         >
           <Logo size={26} />
-          {/* The name disappears first when space runs out: the mark alone
-              still identifies the product, a truncated name does not. */}
+
           <span className="hidden truncate font-display text-[15px] font-semibold tracking-tight lg:block">
             Campaign&nbsp;Mailer
           </span>
@@ -96,20 +90,16 @@ export function Navbar() {
 }
 
 /**
- * A destination.
+ * A navigation destination.
  *
- * The label is text on a tablet and up, and an icon below that, where the bar
- * would otherwise overflow — with the same word as a tooltip and as the
- * accessible name, so nothing is lost, only folded. The active entry is
- * marked by a filled pill as well as by colour, because colour alone is not a
- * signal everyone receives.
+ * Labels appear on medium screens and larger.
+ * On smaller screens, icons remain visible with accessible tooltips.
  */
+
 function NavItem({
   to,
   label,
   icon,
-  // Defaulted rather than forwarded as `undefined`: NavLink's own prop is not
-  // optional-undefined, and `exactOptionalPropertyTypes` is on.
   end = false,
 }: {
   to: string
@@ -124,10 +114,10 @@ function NavItem({
         end={end}
         aria-label={label}
         className={({ isActive }) =>
-          `relative flex h-9 press items-center gap-2 rounded-xl px-2 text-[13px] font-medium sm:px-2.5 md:px-3 ${
+          `relative flex h-9 items-center gap-2 rounded-xl px-2 text-[13px] font-medium transition-[background-color,color] duration-200 sm:px-2.5 md:px-3 ${
             isActive
               ? 'bg-accent-soft text-accent'
-              : 'text-ink-muted hover:bg-surface-2 hover:text-ink'
+              : 'text-ink-muted hover:bg-surface-2/70 hover:text-ink'
           }`
         }
       >
