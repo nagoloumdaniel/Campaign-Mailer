@@ -11,26 +11,12 @@ import { UserMenu } from './UserMenu'
 /**
  * The floating navigation.
  *
- * It sits over the page rather than on top of it: a pane you can see through,
- * so the content scrolling underneath stays visible and the bar reads as a
- * layer rather than as a lid. Only the cast shadow waits for the scroll — at
- * the top of the page there is nothing to float above, and a permanent shadow
- * there is the detail that makes an interface look printed on.
- *
- * The blur is not the bar's alone: `nav-veil` blurs the whole band the bar
- * floats in, gap included, and fades out a little below it. Without it a
- * heading rose through the twelve pixels above the bar in full focus, which is
- * exactly where the illusion breaks. It too arrives with the scroll, since
- * blurring an unscrolled page costs a full-width filter per frame for nothing.
- *
- * The settings are tuned against this application rather than copied from a
- * dark interface where glass is easy. Nearly everything behind this bar is a
- * white card on a near-white canvas, which blurs to exactly the same white:
- * at the 72 % tint the floating toolbars use, a blue button passing underneath
- * was a grey smudge and the pane read as a solid slab. So the tint drops to
- * 42 %, the blur and the saturation go up — a colour crossing underneath now
- * spreads as a wash — and `glass-rim` draws the lit edge that carries the
- * material where there is nothing behind it to blur.
+ * It sits over the page rather than on top of it: a translucent bar with a
+ * blur behind it, held up by a hairline, so the content scrolling underneath
+ * stays visible and the bar reads as a layer rather than as a lid. The border
+ * and the shadow only appear once the page has actually scrolled — at the top
+ * there is nothing to separate it from, and a permanent shadow there is the
+ * detail that makes an interface look printed on.
  *
  * Four destinations and no more. Everything else in the application is
  * reached from one of them, and a navigation with seven entries is a
@@ -63,18 +49,15 @@ export function Navbar() {
 
   return (
     <header className="sticky top-0 z-40 px-3 pt-3 sm:px-5 sm:pt-4">
-      <div
-        aria-hidden="true"
-        className={`nav-veil ${scrolled ? 'opacity-100' : 'opacity-0'}`}
-      />
-
       {/* The destinations are placed on the bar's exact centre, independently
           of the logo on the left and the account controls on the right. A
           three-column grid did not hold on a phone: the right column's minimum
           width, wider than the left's, pulled the links off centre. */}
       <div
-        className={`relative mx-auto flex h-14 max-w-6xl items-center justify-between gap-1.5 rounded-2xl glass px-2 glass-rim [--glass-blur:30px] [--glass-saturation:200%] [--glass-tint:42%] sm:gap-3 sm:px-3.5 ${
-          scrolled ? '[--glass-cast:var(--shadow-card)]' : ''
+        className={`relative mx-auto flex h-14 max-w-6xl items-center justify-between gap-1.5 rounded-2xl glass px-2 transition-[box-shadow,border-color] duration-300 ease-out sm:gap-3 sm:px-3.5 ${
+          scrolled
+            ? 'border border-border shadow-card'
+            : 'border border-transparent shadow-none'
         }`}
       >
         <Link

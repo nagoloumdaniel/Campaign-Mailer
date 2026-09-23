@@ -89,24 +89,6 @@
 }
 
 /* ---------------------------------------------------------------------------
-   The glass rim. Not in @theme, which drops variables no utility class uses,
-   and these are read by hand from `glass-rim`.
-
-   A pane over a white page has almost nothing to blur — a white card on a
-   near-white canvas blurs to the same white — so what tells the eye it is
-   looking through something is the edge: a lit top, where the light catches
-   the bevel, and a faint ring around the whole pane. Over a dark ground the
-   same two lines, far quieter, do the same work.
-   ------------------------------------------------------------------------- */
-:root {
-  --glass-lit: oklch(100% 0 0 / 0.75);
-  /* Neutral rather than white on the light theme: a white ring on a white page
-     draws nothing, and the pane would lose its shape before the page scrolls
-     far enough to cast a shadow under it. */
-  --glass-edge: oklch(64% 0.012 264 / 0.26);
-}
-
-/* ---------------------------------------------------------------------------
    Dark theme. Only the tokens change; not one component branches on the theme.
    The surfaces lift rather than the text dimming: a dark interface reads by
    its planes, and grey-on-grey text is where dark themes usually fail.
@@ -147,9 +129,6 @@
   --shadow-soft: 0 1px 2px oklch(0% 0 0 / 0.3);
   --shadow-card: 0 1px 3px oklch(0% 0 0 / 0.35), 0 8px 24px -12px oklch(0% 0 0 / 0.5);
   --shadow-pop: 0 4px 12px oklch(0% 0 0 / 0.4), 0 24px 48px -16px oklch(0% 0 0 / 0.6);
-
-  --glass-lit: oklch(100% 0 0 / 0.14);
-  --glass-edge: oklch(100% 0 0 / 0.07);
 }
 
 /* ===========================================================================
@@ -251,73 +230,11 @@
 }
 
 /* The floating navigation, and anything else that sits over scrolling
-   content: a surface you can almost see through, held up by a hairline.
-   `--glass-tint` is how much of the surface stays in front of the page. The
-   default suits a toolbar whose own controls have to be read first; the
-   navigation, which spans the whole page and wants to show what passes under
-   it, lowers it and blurs harder to pay for the legibility. */
+   content: a surface you can almost see through, held up by a hairline. */
 @utility glass {
-  background-color: color-mix(
-    in oklab,
-    var(--color-surface) var(--glass-tint, 72%),
-    transparent
-  );
-  backdrop-filter: blur(var(--glass-blur, 16px)) saturate(var(--glass-saturation, 180%));
-  -webkit-backdrop-filter: blur(var(--glass-blur, 16px))
-    saturate(var(--glass-saturation, 180%));
-}
-
-/* The edge that makes a translucent slab read as a pane rather than as a weak
-   white. It carries the cast shadow too, through `--glass-cast`, because a
-   second `box-shadow` utility would replace this one rather than add to it. */
-@utility glass-rim {
-  box-shadow:
-    inset 0 1px 0 var(--glass-lit),
-    inset 0 0 0 1px var(--glass-edge),
-    var(--glass-cast, 0 0 transparent);
-  transition: box-shadow 300ms var(--ease-out);
-}
-
-/* The band the navigation floats in.
-   The bar is glass, but the page also scrolls through the gap above and around
-   it, and content crossing that gap in full focus makes the bar read as pasted
-   on rather than laid over. Two blurred layers under fading masks stand in for
-   a progressive blur — heavy behind the bar, light just below it, gone after
-   that — so a card sliding underneath dissolves instead of crossing a line.
-   Two layers rather than the usual stack of five: over four rem of height the
-   difference is not visible, and each layer is a full-width backdrop filter
-   recomputed on every scrolled frame. */
-@utility nav-veil {
-  pointer-events: none;
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
-  height: calc(100% + 1.75rem);
-  transition: opacity 300ms var(--ease-out);
-
-  &::before,
-  &::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-  }
-
-  /* The light pass reaches furthest down, so focus comes back over a distance
-     rather than at an edge. */
-  &::before {
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
-    mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
-  }
-
-  /* The heavy pass stops just under the bar. */
-  &::after {
-    backdrop-filter: blur(22px) saturate(190%);
-    -webkit-backdrop-filter: blur(22px) saturate(190%);
-    -webkit-mask-image: linear-gradient(to bottom, #000 48%, transparent 80%);
-    mask-image: linear-gradient(to bottom, #000 48%, transparent 80%);
-  }
+  background-color: color-mix(in oklab, var(--color-surface) 72%, transparent);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
 }
 
 /* A panel that arrives inside a page the user is already reading. */
