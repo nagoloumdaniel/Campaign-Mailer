@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { useAuth } from '@/auth/useAuth'
+import { IntegrationTokens } from '@/components/account/IntegrationTokens'
 import { Avatar } from '@/components/layout/UserMenu'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { AnchorButton, Button } from '@/components/ui/Button'
@@ -42,6 +43,7 @@ export function Account() {
         </div>
 
         <div className="space-y-4">
+          <IntegrationTokens />
           <DataExport />
           <DeleteAccount email={email} />
         </div>

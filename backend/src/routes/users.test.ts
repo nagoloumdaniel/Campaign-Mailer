@@ -59,6 +59,7 @@ const SAMPLE_EXPORT: UserExport = {
     },
   ],
   addressBook: [],
+  integrationTokens: [],
 }
 
 let baseUrl: string

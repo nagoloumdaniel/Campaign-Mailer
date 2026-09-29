@@ -23,6 +23,8 @@ export const AUDIT_ACTIONS = [
   'account.exported',
   'account.deleted',
   'terms.accepted',
+  'integration_token.created',
+  'integration_token.revoked',
 ] as const
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number]

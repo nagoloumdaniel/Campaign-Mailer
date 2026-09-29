@@ -15,6 +15,7 @@ import { deleteCampaignFiles } from '../services/storage.js'
 import { createTermsRepository } from '../services/terms.js'
 import { buildUserExport } from '../services/userExport.js'
 import { createHistoryRepository } from '../services/history.js'
+import { createIntegrationTokenRepository } from '../services/integrationTokens.js'
 import { createLogExportRepository } from '../services/logExport.js'
 import type { ReadinessReport } from '../services/readiness.js'
 import { createStatsRepository } from '../services/stats.js'
@@ -28,6 +29,7 @@ import { createCampaignRouter } from './campaigns.js'
 import { createContactRouter } from './contacts.js'
 import { createDashboardRouter } from './dashboard.js'
 import { createHistoryRouter } from './history.js'
+import { createIntegrationTokenRouter } from './integrationTokens.js'
 import { createLogExportRouter } from './logExport.js'
 import { createReadyRouter } from './ready.js'
 import { createStatsRouter } from './stats.js'
@@ -86,11 +88,27 @@ export function createApiRouter(deps: ApiRouterDeps = {}): Router {
   // current terms being accepted. The account routes above do not: exporting
   // and deleting one's data are rights.
   apiRouter.use(
-    ['/campaigns', '/contacts', '/dashboard', '/history', '/templates'],
+    [
+      '/campaigns',
+      '/contacts',
+      '/dashboard',
+      '/history',
+      '/templates',
+      '/integration-tokens',
+    ],
     requireCurrentTerms,
   )
 
   const campaignRepository = createCampaignRepository(pool)
+
+  // Tokens for the MailFind integration (roadmap, Phase 9), managed by session.
+  apiRouter.use(
+    '/integration-tokens',
+    createIntegrationTokenRouter({
+      tokens: createIntegrationTokenRepository(pool),
+      audit,
+    }),
+  )
 
   apiRouter.use(
     '/campaigns',
