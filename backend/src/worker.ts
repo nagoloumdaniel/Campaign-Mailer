@@ -334,7 +334,7 @@ const RETENTION_EVERY_MS = 24 * 60 * 60 * 1000
 function purgeOld(): void {
   purgeExpired(pool)
     .then((report) => {
-      if (report.logs + report.auditEvents > 0) {
+      if (report.logs + report.auditEvents + report.idempotencyKeys > 0) {
         log.info(report, 'Retention purge')
       }
     })

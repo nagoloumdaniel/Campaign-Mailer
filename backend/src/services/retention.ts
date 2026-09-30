@@ -1,5 +1,7 @@
 import type { Pool } from 'pg'
 
+import { createIdempotencyRepository } from './idempotency.js'
+
 /**
  * How long the application keeps what it records about sending (roadmap #86).
  *
@@ -20,6 +22,8 @@ export const RETENTION_INTERVAL = '12 months'
 export interface PurgeReport {
   logs: number
   auditEvents: number
+  /** Idempotency keys of the v1 API past their 24 hours. */
+  idempotencyKeys: number
 }
 
 export async function purgeExpired(pool: Pool): Promise<PurgeReport> {
@@ -30,5 +34,11 @@ export async function purgeExpired(pool: Pool): Promise<PurgeReport> {
     `DELETE FROM audit_events WHERE created_at < now() - interval '${RETENTION_INTERVAL}'`,
   )
 
-  return { logs: logs.rowCount ?? 0, auditEvents: auditEvents.rowCount ?? 0 }
+  const idempotencyKeys = await createIdempotencyRepository(pool).purgeExpired()
+
+  return {
+    logs: logs.rowCount ?? 0,
+    auditEvents: auditEvents.rowCount ?? 0,
+    idempotencyKeys,
+  }
 }
