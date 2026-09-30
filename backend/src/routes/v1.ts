@@ -9,6 +9,7 @@ import {
   type IntegrationUserLookup,
 } from '../middleware/integrationAuth.js'
 import { requireCurrentTerms } from '../middleware/terms.js'
+import { buildV1Document } from '../openapi/v1Document.js'
 import { validateBody } from '../middleware/validate.js'
 import {
   v1AddContactsSchema,
@@ -131,6 +132,15 @@ function publicCampaign(campaign: CampaignRow, frontendUrl: string) {
  */
 export function createV1Router(deps: V1RouterDeps): Router {
   const router = Router()
+
+  // The document reads without a token: one should be able to discover the
+  // API before having an account. Built once, on the first call.
+  let document: object | undefined
+  router.get('/openapi.json', (_req, res) => {
+    // The web app's domain relays /api in production: it is the API's too.
+    document ??= buildV1Document(deps.frontendUrl)
+    res.json(document)
+  })
 
   // A batch of 2 000 rows is larger than the general body limit.
   router.use(express.json({ limit: '5mb' }))

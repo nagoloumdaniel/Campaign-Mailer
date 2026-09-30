@@ -6,6 +6,8 @@ import { after, before, describe, it } from 'node:test'
 import session from 'express-session'
 import pg from 'pg'
 
+import { v1ErrorSchema, v1ImportResponseSchema } from '../openapi/v1Document.js'
+
 /**
  * The v1 API over HTTP, against a real PostgreSQL and the real application:
  * the token, the terms gate, the rate limit, the idempotency and the import
@@ -67,7 +69,20 @@ async function call(
     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
   })
   const text = await res.text()
-  return { res, body: (text ? JSON.parse(text) : null) as Record<string, unknown> }
+  const body = (text ? JSON.parse(text) : null) as Record<string, unknown>
+
+  // The contract: every answer matches the OpenAPI document's schema for it.
+  if (res.status === 201) {
+    const parsed = v1ImportResponseSchema.safeParse(body)
+    assert.ok(
+      parsed.success,
+      `201 off the document: ${JSON.stringify(parsed.error?.issues)}`,
+    )
+  } else if (res.status >= 400) {
+    assert.ok(v1ErrorSchema.safeParse(body).success, `error off the document: ${text}`)
+  }
+
+  return { res, body }
 }
 
 describe('the v1 API', { skip: !loaded }, () => {
@@ -316,6 +331,17 @@ describe('the v1 API', { skip: !loaded }, () => {
     })
     assert.equal(res.status, 403)
     assert.equal(body.code, 'insufficient_scope')
+  })
+
+  it('serves its OpenAPI document without a token', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/openapi.json`)
+    const document = (await res.json()) as {
+      openapi: string
+      paths: Record<string, unknown>
+    }
+    assert.equal(res.status, 200)
+    assert.equal(document.openapi, '3.1.0')
+    assert.ok('/campaigns' in document.paths)
   })
 
   it('answers 404 on an unknown route, still behind the token', async () => {
