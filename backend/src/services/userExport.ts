@@ -71,6 +71,11 @@ export interface ExportedContact {
   errorMessage: string | null
   attempts: number
   sentAt: string | null
+  /** Where MailFind found the address, and its verification there. */
+  source: string
+  sourceUrl: string | null
+  verificationStatus: string | null
+  verifiedAt: string | null
 }
 
 export interface ExportedLog {
@@ -135,9 +140,14 @@ export async function buildUserExport(
     error_message: string | null
     attempts: number
     sent_at: Date | null
+    source: string
+    source_url: string | null
+    verification_status: string | null
+    verified_at: Date | null
   }>(
     `SELECT ct.campaign_id, ct.email, ct.contact_name, ct.company_name, ct.salutation,
-            ct.status, ct.error_message, ct.attempts, ct.sent_at
+            ct.status, ct.error_message, ct.attempts, ct.sent_at, ct.source, ct.source_url,
+            ct.verification_status, ct.verified_at
      FROM contacts ct JOIN campaigns c ON c.id = ct.campaign_id
      WHERE c.user_id = $1
      ORDER BY ct.created_at, ct.email`,
@@ -172,6 +182,10 @@ export async function buildUserExport(
       errorMessage: row.error_message,
       attempts: row.attempts,
       sentAt: iso(row.sent_at),
+      source: row.source,
+      sourceUrl: row.source_url,
+      verificationStatus: row.verification_status,
+      verifiedAt: iso(row.verified_at),
     })
     contactsByCampaign.set(row.campaign_id, list)
   }

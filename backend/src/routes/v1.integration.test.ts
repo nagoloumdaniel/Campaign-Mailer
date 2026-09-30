@@ -241,6 +241,73 @@ describe('the v1 API', { skip: !loaded }, () => {
     assert.equal(late.body.code, 'campaign_not_editable')
   })
 
+  it('records where MailFind found each address, and its verification', async () => {
+    const { res, body } = await call('/campaigns', {
+      secret: token,
+      key: 'provenance',
+      body: {
+        name: 'Avec provenance',
+        contacts: [
+          {
+            email: 'recrutement@acme.fr',
+            source_url: 'https://acme.fr/carrieres',
+            verification_status: 'valid',
+            verified_at: '2026-09-29T10:00:00Z',
+          },
+          { email: 'contact@acme.fr', verification_status: 'unverified' },
+        ],
+      },
+    })
+    assert.equal(res.status, 201)
+    const id = (body.campaign as { id: string }).id
+    const { rows } = await pool.query<{
+      email: string
+      source_url: string | null
+      verification_status: string | null
+      verified_at: Date | null
+    }>(
+      `SELECT email, source_url, verification_status, verified_at
+         FROM contacts WHERE campaign_id = $1 ORDER BY email`,
+      [id],
+    )
+    assert.deepEqual(
+      rows.map((r) => [
+        r.email,
+        r.source_url,
+        r.verification_status,
+        r.verified_at?.toISOString() ?? null,
+      ]),
+      [
+        ['contact@acme.fr', null, 'unverified', null],
+        [
+          'recrutement@acme.fr',
+          'https://acme.fr/carrieres',
+          'valid',
+          '2026-09-29T10:00:00.000Z',
+        ],
+      ],
+    )
+  })
+
+  it('refuses a status MailFind never sends, and a verified status without its date', async () => {
+    for (const contact of [
+      {
+        email: 'a@acme.fr',
+        verification_status: 'invalid',
+        verified_at: '2026-09-29T10:00:00Z',
+      },
+      { email: 'a@acme.fr', verification_status: 'valid' },
+      { email: 'a@acme.fr', source_url: 'javascript:alert(1)' },
+    ]) {
+      const { res } = await call('/campaigns', {
+        secret: token,
+        key: `refused-${JSON.stringify(contact)}`.slice(0, 200),
+        body: { name: 'Refusée', contacts: [contact] },
+      })
+      assert.equal(res.status, 400, JSON.stringify(contact))
+    }
+  })
+
   it('checks the scope of the token', async () => {
     const { res, body } = await call('/campaigns', {
       secret: readOnlyToken,

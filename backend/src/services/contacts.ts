@@ -103,7 +103,7 @@ export function createContactRepository(pool: Pool): ContactRepository {
           const slice = contacts.slice(start, start + CHUNK)
           const values: unknown[] = []
           const tuples = slice.map((contact, index) => {
-            const base = index * 6
+            const base = index * 9
             values.push(
               campaignId,
               contact.email,
@@ -111,8 +111,11 @@ export function createContactRepository(pool: Pool): ContactRepository {
               contact.company_name,
               contact.salutation,
               source,
+              contact.provenance?.source_url ?? null,
+              contact.provenance?.verification_status ?? null,
+              contact.provenance?.verified_at ?? null,
             )
-            return `($${String(base + 1)}, $${String(base + 2)}, $${String(base + 3)}, $${String(base + 4)}, $${String(base + 5)}, $${String(base + 6)})`
+            return `($${String(base + 1)}, $${String(base + 2)}, $${String(base + 3)}, $${String(base + 4)}, $${String(base + 5)}, $${String(base + 6)}, $${String(base + 7)}, $${String(base + 8)}, $${String(base + 9)})`
           })
 
           // ON CONFLICT DO NOTHING rather than a failure: the unique index on
@@ -120,7 +123,8 @@ export function createContactRepository(pool: Pool): ContactRepository {
           // row that slipped past the in-memory check because of a concurrent
           // import should be skipped, not abort the whole file.
           const result = await client.query(
-            `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation, source)
+            `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation, source,
+                                   source_url, verification_status, verified_at)
              VALUES ${tuples.join(', ')}
              ON CONFLICT DO NOTHING`,
             values,
