@@ -12,6 +12,13 @@ export interface Contact {
   errorMessage: string | null
   attempts: number
   sentAt: string | null
+  /** Where the contact came from: a CSV file, typed by hand, or MailFind. */
+  source: 'csv' | 'manual' | 'mailfind'
+  /** The page MailFind found the address on. */
+  sourceUrl: string | null
+  /** MailFind's verification; only `valid` means a mailbox was confirmed. */
+  verificationStatus: 'valid' | 'accept_all' | 'risky' | 'unknown' | 'unverified' | null
+  verifiedAt: string | null
 }
 
 export type RejectionReason = 'invalid_email' | 'duplicate_in_file' | 'already_imported'
@@ -61,9 +68,14 @@ export const contactsApi = {
 
     const suffix = params.toString() ? `?${params.toString()}` : ''
 
-    return api.get<{ contacts: Contact[]; total: number; limit: number; offset: number }>(
-      `/campaigns/${campaignId}/contacts${suffix}`,
-    )
+    return api.get<{
+      contacts: Contact[]
+      total: number
+      limit: number
+      offset: number
+      /** Contacts of the campaign sent by MailFind, whatever the filters. */
+      fromMailfind: number
+    }>(`/campaigns/${campaignId}/contacts${suffix}`)
   },
 
   /**

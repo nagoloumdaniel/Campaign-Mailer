@@ -302,6 +302,16 @@ describe('the v1 API', { skip: !loaded }, () => {
         ],
       ],
     )
+
+    // The campaign page reads them back: the count for the notice, the
+    // provenance row by row.
+    const { createContactRepository } = await import('../services/contacts.js')
+    const listed = await createContactRepository(pool).list(id, { limit: 10, offset: 0 })
+    assert.equal(listed.fromMailfind, 2)
+    const recruiting = listed.contacts.find((c) => c.email === 'recrutement@acme.fr')
+    assert.equal(recruiting?.source, 'mailfind')
+    assert.equal(recruiting.source_url, 'https://acme.fr/carrieres')
+    assert.equal(recruiting.verification_status, 'valid')
   })
 
   it('refuses a status MailFind never sends, and a verified status without its date', async () => {

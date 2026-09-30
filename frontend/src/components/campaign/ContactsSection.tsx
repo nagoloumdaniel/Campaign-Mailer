@@ -17,7 +17,7 @@ import {
   type Contact,
   type ContactStatus,
 } from '@/services/contacts'
-import { formatNumber } from '@/services/format'
+import { formatDate, formatNumber } from '@/services/format'
 
 import { PickContactsDialog } from '../contacts/PickContactsDialog'
 
@@ -74,6 +74,7 @@ export function ContactsSection({
 }) {
   const [contacts, setContacts] = useState<Contact[]>([])
   const [total, setTotal] = useState(0)
+  const [fromMailfind, setFromMailfind] = useState(0)
   const [offset, setOffset] = useState(0)
   const [status, setStatus] = useState<ContactStatus | 'all'>('all')
   const [search, setSearch] = useState('')
@@ -99,6 +100,7 @@ export function ContactsSection({
 
       setContacts(result.contacts)
       setTotal(result.total)
+      setFromMailfind(result.fromMailfind)
     } catch {
       // Said in place rather than in a toast: left empty, the table would read
       // "no contacts, import a file", and the user would import them twice.
@@ -193,6 +195,20 @@ export function ContactsSection({
           )
         }
       />
+
+      {fromMailfind > 0 && (
+        // Said once, above the table: which contacts came from MailFind, and
+        // that their company and source are shown row by row.
+        <p className="mt-4 flex items-start gap-2 rounded-xl bg-accent-soft px-3.5 py-2.5 text-xs leading-relaxed">
+          <Icon name="building" size={13} className="mt-px shrink-0 text-accent" />
+          <span>
+            <span className="font-semibold">Importé depuis MailFind</span> :{' '}
+            {formatNumber(fromMailfind)} contact{fromMailfind > 1 ? 's' : ''}.
+            L’entreprise, la page où chaque adresse a été trouvée et sa vérification sont
+            indiquées dans le tableau.
+          </span>
+        </p>
+      )}
 
       {totalContacts === 0 && !filtering ? (
         <EmptyState
@@ -333,8 +349,13 @@ export function ContactsSection({
                         )}
                       </td>
 
-                      <td className="max-w-40 truncate px-3 py-2.5 text-ink-muted max-sm:hidden">
-                        {contact.companyName ?? '—'}
+                      <td className="max-w-48 px-3 py-2.5 text-ink-muted max-sm:hidden">
+                        <span className="block truncate">
+                          {contact.companyName ?? '—'}
+                        </span>
+                        {contact.source === 'mailfind' && (
+                          <MailfindProvenance contact={contact} />
+                        )}
                       </td>
 
                       {!finished && (
@@ -459,5 +480,57 @@ export function ContactsSection({
         }}
       />
     </Card>
+  )
+}
+
+/** The host of a source, or the address itself when it does not parse: one bad value must not break the table. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
+  }
+}
+
+/** What MailFind says of each status: only `valid` is a confirmed mailbox. */
+const VERIFICATION_LABEL: Record<NonNullable<Contact['verificationStatus']>, string> = {
+  valid: 'Boîte confirmée par MailFind',
+  accept_all: 'Domaine qui accepte tout : non confirmée',
+  risky: 'Adresse à risque : non confirmée',
+  unknown: 'Vérification sans réponse : non confirmée',
+  unverified: 'Non vérifiée',
+}
+
+/**
+ * Where MailFind found the address and what its verification said, under
+ * the company. The source opens in a new tab without handing over the
+ * campaign page (noopener).
+ */
+function MailfindProvenance({ contact }: { contact: Contact }) {
+  const status = contact.verificationStatus
+
+  return (
+    <span className="mt-0.5 block space-y-0.5 text-xs">
+      {contact.sourceUrl && (
+        <a
+          href={contact.sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block truncate text-accent underline"
+        >
+          Source : {hostOf(contact.sourceUrl)}
+        </a>
+      )}
+      {status && (
+        <span
+          className={`block truncate ${status === 'valid' ? 'text-success' : 'text-ink-subtle'}`}
+        >
+          {VERIFICATION_LABEL[status]}
+          {status !== 'unverified' && contact.verifiedAt
+            ? `, le ${formatDate(contact.verifiedAt)}`
+            : ''}
+        </span>
+      )}
+    </span>
   )
 }
