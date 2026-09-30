@@ -17,6 +17,13 @@ import { buildSessionOptions } from './config/session.js'
 import { logger } from './logger.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
 import { createApiRouter, type ApiRouterDeps } from './routes/index.js'
+import { createV1Router } from './routes/v1.js'
+import { pool } from './db/pool.js'
+import { createCampaignRepository } from './services/campaigns.js'
+import { createContactRepository } from './services/contacts.js'
+import { createIdempotencyRepository } from './services/idempotency.js'
+import { createIntegrationTokenRepository } from './services/integrationTokens.js'
+import { createUserRepository } from './services/users.js'
 
 export interface AppDeps extends ApiRouterDeps {
   /** Injected so tests can build the app without a Redis connection. */
@@ -50,6 +57,21 @@ export function createApp({
   // Next, so the headers are present on every response including errors.
   app.use(helmet(buildHelmetOptions(isProduction)))
   app.use(cors(buildCorsOptions(env.frontendUrl)))
+
+  // The v1 API before the body parser and the session: a program calling it
+  // carries a token, never a cookie, and a batch of 2 000 rows would not get
+  // past the general 1 MB limit. It reads its own body.
+  app.use(
+    '/api/v1',
+    createV1Router({
+      tokens: createIntegrationTokenRepository(pool),
+      users: createUserRepository(pool),
+      campaigns: createCampaignRepository(pool),
+      contacts: createContactRepository(pool),
+      idempotency: createIdempotencyRepository(pool),
+      frontendUrl: env.frontendUrl,
+    }),
+  )
 
   app.use(express.json({ limit: '1mb' }))
   app.use(express.urlencoded({ extended: false }))

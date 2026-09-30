@@ -30,6 +30,15 @@ export interface UserExport {
     source: string
     createdAt: string
   }[]
+  /** Integration tokens, as the account page shows them: never the hash. */
+  integrationTokens: {
+    name: string
+    prefix: string
+    scopes: string[]
+    lastUsedAt: string | null
+    revokedAt: string | null
+    createdAt: string
+  }[]
 }
 
 export interface ExportedCampaign {
@@ -192,6 +201,19 @@ export async function buildUserExport(
     [userId],
   )
 
+  const tokens = await pool.query<{
+    name: string
+    prefix: string
+    scopes: string[]
+    last_used_at: Date | null
+    revoked_at: Date | null
+    created_at: Date
+  }>(
+    `SELECT name, prefix, scopes, last_used_at, revoked_at, created_at
+     FROM integration_tokens WHERE user_id = $1 ORDER BY created_at, id`,
+    [userId],
+  )
+
   return {
     exportedAt: new Date().toISOString(),
     account: {
@@ -224,6 +246,14 @@ export async function buildUserExport(
       companyName: row.company_name,
       salutation: row.salutation,
       source: row.source,
+      createdAt: row.created_at.toISOString(),
+    })),
+    integrationTokens: tokens.rows.map((row) => ({
+      name: row.name,
+      prefix: row.prefix,
+      scopes: row.scopes,
+      lastUsedAt: iso(row.last_used_at),
+      revokedAt: iso(row.revoked_at),
       createdAt: row.created_at.toISOString(),
     })),
   }

@@ -35,7 +35,12 @@ export interface ListContactsOptions {
 
 export interface ContactRepository {
   existingEmails(campaignId: string): Promise<Set<string>>
-  insertMany(campaignId: string, contacts: ImportedContact[]): Promise<number>
+  /** source says where the rows came from: a CSV file by default, or MailFind. */
+  insertMany(
+    campaignId: string,
+    contacts: ImportedContact[],
+    source?: 'csv' | 'mailfind',
+  ): Promise<number>
   list(
     campaignId: string,
     options: ListContactsOptions,
@@ -82,7 +87,7 @@ export function createContactRepository(pool: Pool): ContactRepository {
       return new Set(rows.map((row) => row.email))
     },
 
-    async insertMany(campaignId, contacts) {
+    async insertMany(campaignId, contacts, source = 'csv') {
       if (contacts.length === 0) {
         return 0
       }
@@ -98,15 +103,16 @@ export function createContactRepository(pool: Pool): ContactRepository {
           const slice = contacts.slice(start, start + CHUNK)
           const values: unknown[] = []
           const tuples = slice.map((contact, index) => {
-            const base = index * 5
+            const base = index * 6
             values.push(
               campaignId,
               contact.email,
               contact.contact_name,
               contact.company_name,
               contact.salutation,
+              source,
             )
-            return `($${String(base + 1)}, $${String(base + 2)}, $${String(base + 3)}, $${String(base + 4)}, $${String(base + 5)})`
+            return `($${String(base + 1)}, $${String(base + 2)}, $${String(base + 3)}, $${String(base + 4)}, $${String(base + 5)}, $${String(base + 6)})`
           })
 
           // ON CONFLICT DO NOTHING rather than a failure: the unique index on
@@ -114,7 +120,7 @@ export function createContactRepository(pool: Pool): ContactRepository {
           // row that slipped past the in-memory check because of a concurrent
           // import should be skipped, not abort the whole file.
           const result = await client.query(
-            `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation)
+            `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation, source)
              VALUES ${tuples.join(', ')}
              ON CONFLICT DO NOTHING`,
             values,
