@@ -18,11 +18,16 @@ export interface ContactRow {
   sent_at: Date | null
   opened_at: Date | null
   clicked_at: Date | null
+  source: 'csv' | 'manual' | 'mailfind'
+  source_url: string | null
+  verification_status: 'valid' | 'accept_all' | 'risky' | 'unknown' | 'unverified' | null
+  verified_at: Date | null
 }
 
 const COLUMNS = `
   id, campaign_id, email, company_name, contact_name, salutation,
-  status, error_message, attempts, created_at, sent_at, opened_at, clicked_at
+  status, error_message, attempts, created_at, sent_at, opened_at, clicked_at,
+  source, source_url, verification_status, verified_at
 `
 
 export interface ListContactsOptions {
@@ -35,7 +40,7 @@ export interface ListContactsOptions {
 
 export interface ContactRepository {
   existingEmails(campaignId: string): Promise<Set<string>>
-  /** source says where the rows came from: a CSV file by default, or MailFind. */
+  /** `source` says where the rows came from: a CSV file by default, or MailFind. */
   insertMany(
     campaignId: string,
     contacts: ImportedContact[],
@@ -44,7 +49,7 @@ export interface ContactRepository {
   list(
     campaignId: string,
     options: ListContactsOptions,
-  ): Promise<{ contacts: ContactRow[]; total: number }>
+  ): Promise<{ contacts: ContactRow[]; total: number; fromMailfind: number }>
   add(
     campaignId: string,
     contact: Omit<ImportedContact, 'line'>,
@@ -103,7 +108,7 @@ export function createContactRepository(pool: Pool): ContactRepository {
           const slice = contacts.slice(start, start + CHUNK)
           const values: unknown[] = []
           const tuples = slice.map((contact, index) => {
-            const base = index * 6
+            const base = index * 9
             values.push(
               campaignId,
               contact.email,
@@ -111,8 +116,11 @@ export function createContactRepository(pool: Pool): ContactRepository {
               contact.company_name,
               contact.salutation,
               source,
+              contact.provenance?.source_url ?? null,
+              contact.provenance?.verification_status ?? null,
+              contact.provenance?.verified_at ?? null,
             )
-            return `($${String(base + 1)}, $${String(base + 2)}, $${String(base + 3)}, $${String(base + 4)}, $${String(base + 5)}, $${String(base + 6)})`
+            return `($${String(base + 1)}, $${String(base + 2)}, $${String(base + 3)}, $${String(base + 4)}, $${String(base + 5)}, $${String(base + 6)}, $${String(base + 7)}, $${String(base + 8)}, $${String(base + 9)})`
           })
 
           // ON CONFLICT DO NOTHING rather than a failure: the unique index on
@@ -120,7 +128,8 @@ export function createContactRepository(pool: Pool): ContactRepository {
           // row that slipped past the in-memory check because of a concurrent
           // import should be skipped, not abort the whole file.
           const result = await client.query(
-            `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation, source)
+            `INSERT INTO contacts (campaign_id, email, contact_name, company_name, salutation, source,
+                                   source_url, verification_status, verified_at)
              VALUES ${tuples.join(', ')}
              ON CONFLICT DO NOTHING`,
             values,
@@ -174,7 +183,18 @@ export function createContactRepository(pool: Pool): ContactRepository {
         [...values, options.limit, options.offset],
       )
 
-      return { contacts: rows, total: Number(counted[0]?.total ?? 0) }
+      // Whatever the filters: the campaign page says once how many of its
+      // contacts MailFind sent.
+      const { rows: mailfind } = await pool.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM contacts WHERE campaign_id = $1 AND source = 'mailfind'`,
+        [campaignId],
+      )
+
+      return {
+        contacts: rows,
+        total: Number(counted[0]?.total ?? 0),
+        fromMailfind: Number(mailfind[0]?.n ?? 0),
+      }
     },
 
     async add(campaignId, contact) {

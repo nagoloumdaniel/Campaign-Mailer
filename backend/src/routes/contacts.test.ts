@@ -47,6 +47,10 @@ function contactRow(email: string, status: ContactStatus = 'pending'): ContactRo
     sent_at: null,
     opened_at: null,
     clicked_at: null,
+    source: 'csv',
+    source_url: null,
+    verification_status: null,
+    verified_at: null,
   }
 }
 
@@ -56,7 +60,12 @@ const contacts: ContactRepository = {
     inserted = rows
     return Promise.resolve(rows.length)
   },
-  list: () => Promise.resolve({ contacts: [contactRow('a@exemple.fr')], total: 1 }),
+  list: () =>
+    Promise.resolve({
+      contacts: [contactRow('a@exemple.fr')],
+      total: 1,
+      fromMailfind: 0,
+    }),
   add: (_campaignId, contact) =>
     Promise.resolve(stored.has(contact.email) ? null : contactRow(contact.email)),
   update: (_campaignId, contactId, patch) =>

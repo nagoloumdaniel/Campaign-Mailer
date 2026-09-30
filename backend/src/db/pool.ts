@@ -19,7 +19,11 @@ export const pool = new pg.Pool({
   // own pool.
   max: 10,
   idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 10_000,
+  // The worker sleeps between plans (jobs/idleSleep.ts) longer than Neon's
+  // five-minute suspend threshold, so the reconnect on wake often pays a cold
+  // start. 10s clipped some of those; 20s covers them without masking a real
+  // outage. Seen in production: Sentry 5ea856fb5ef44d399bc0acb10a48dede.
+  connectionTimeoutMillis: 20_000,
 })
 
 pool.on('error', (err) => {

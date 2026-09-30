@@ -156,3 +156,26 @@ describe('collectContacts', () => {
     assert.equal(result.accepted[0]?.company_name?.length, 200)
   })
 })
+
+describe('collectContacts, provenance from MailFind', () => {
+  it('keeps where the address was found and its verification', () => {
+    const { accepted } = collectContacts([
+      {
+        email: 'rh@acme.fr',
+        source_url: 'https://acme.fr/carrieres',
+        verification_status: 'valid',
+        verified_at: '2026-09-29T10:00:00Z',
+      },
+    ])
+    assert.deepEqual(accepted[0]?.provenance, {
+      source_url: 'https://acme.fr/carrieres',
+      verification_status: 'valid',
+      verified_at: '2026-09-29T10:00:00Z',
+    })
+  })
+
+  it('gives a CSV row no provenance at all', () => {
+    const { accepted } = collectContacts([{ email: 'rh@acme.fr', contact_name: 'Marie' }])
+    assert.equal(accepted[0]?.provenance, undefined)
+  })
+})

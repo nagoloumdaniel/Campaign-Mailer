@@ -24,6 +24,20 @@ export interface ImportedContact {
   salutation: string | null
   /** The line the user would see in their spreadsheet. */
   line: number
+  /**
+   * What MailFind knows: where the address was found, and its verification.
+   * Absent for a CSV row or a contact typed by hand.
+   */
+  provenance?: ContactProvenance | undefined
+}
+
+export type VerificationStatus =
+  'valid' | 'accept_all' | 'risky' | 'unknown' | 'unverified'
+
+export interface ContactProvenance {
+  source_url: string | null
+  verification_status: VerificationStatus | null
+  verified_at: string | null
 }
 
 export interface RejectedRow {
@@ -44,6 +58,9 @@ export interface RawRow {
   contact_name?: string | undefined
   company_name?: string | undefined
   salutation?: string | undefined
+  source_url?: string | undefined
+  verification_status?: VerificationStatus | undefined
+  verified_at?: string | undefined
 }
 
 export interface CollectOptions {
@@ -128,6 +145,22 @@ export function normaliseEmail(raw: string | undefined): string | null {
   return value
 }
 
+/**
+ * MailFind's provenance fields, when the row carries any. The schema of the v1
+ * API has already checked their shape; a CSV row never has them.
+ */
+function provenanceOf(row: RawRow): ContactProvenance | undefined {
+  if (!row.source_url && !row.verification_status && !row.verified_at) {
+    return undefined
+  }
+
+  return {
+    source_url: row.source_url ?? null,
+    verification_status: row.verification_status ?? null,
+    verified_at: row.verified_at ?? null,
+  }
+}
+
 function optional(value: string | undefined, max: number): string | null {
   const trimmed = value?.trim() ?? ''
 
@@ -176,12 +209,14 @@ export function collectContacts(
     }
 
     seen.add(email)
+    const provenance = provenanceOf(row)
     accepted.push({
       email,
       contact_name: optional(row.contact_name, MAX_NAME),
       company_name: optional(row.company_name, MAX_NAME),
       salutation: optional(row.salutation, MAX_SALUTATION),
       line,
+      ...(provenance ? { provenance } : {}),
     })
   })
 

@@ -68,14 +68,16 @@ export function createContactRouter({ campaigns, contacts }: ContactRouterDeps):
         return
       }
 
-      const { contacts: rows, total } = await contacts.list(
-        campaignOf(res).id,
-        query.data,
-      )
+      const {
+        contacts: rows,
+        total,
+        fromMailfind,
+      } = await contacts.list(campaignOf(res).id, query.data)
 
       res.json({
         contacts: rows.map(toPublicContact),
         total,
+        fromMailfind,
         limit: query.data.limit,
         offset: query.data.offset,
       })
@@ -229,5 +231,9 @@ function toPublicContact(row: ContactRow) {
     errorMessage: row.error_message,
     attempts: row.attempts,
     sentAt: row.sent_at?.toISOString() ?? null,
+    source: row.source,
+    sourceUrl: row.source_url,
+    verificationStatus: row.verification_status,
+    verifiedAt: row.verified_at?.toISOString() ?? null,
   }
 }

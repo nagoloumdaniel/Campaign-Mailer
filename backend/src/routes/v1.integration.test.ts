@@ -6,6 +6,8 @@ import { after, before, describe, it } from 'node:test'
 import session from 'express-session'
 import pg from 'pg'
 
+import { v1ErrorSchema, v1ImportResponseSchema } from '../openapi/v1Document.js'
+
 /**
  * The v1 API over HTTP, against a real PostgreSQL and the real application:
  * the token, the terms gate, the rate limit, the idempotency and the import
@@ -67,7 +69,20 @@ async function call(
     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
   })
   const text = await res.text()
-  return { res, body: (text ? JSON.parse(text) : null) as Record<string, unknown> }
+  const body = (text ? JSON.parse(text) : null) as Record<string, unknown>
+
+  // The contract: every answer matches the OpenAPI document's schema for it.
+  if (res.status === 201) {
+    const parsed = v1ImportResponseSchema.safeParse(body)
+    assert.ok(
+      parsed.success,
+      `201 off the document: ${JSON.stringify(parsed.error?.issues)}`,
+    )
+  } else if (res.status >= 400) {
+    assert.ok(v1ErrorSchema.safeParse(body).success, `error off the document: ${text}`)
+  }
+
+  return { res, body }
 }
 
 describe('the v1 API', { skip: !loaded }, () => {
@@ -241,6 +256,83 @@ describe('the v1 API', { skip: !loaded }, () => {
     assert.equal(late.body.code, 'campaign_not_editable')
   })
 
+  it('records where MailFind found each address, and its verification', async () => {
+    const { res, body } = await call('/campaigns', {
+      secret: token,
+      key: 'provenance',
+      body: {
+        name: 'Avec provenance',
+        contacts: [
+          {
+            email: 'recrutement@acme.fr',
+            source_url: 'https://acme.fr/carrieres',
+            verification_status: 'valid',
+            verified_at: '2026-09-29T10:00:00Z',
+          },
+          { email: 'contact@acme.fr', verification_status: 'unverified' },
+        ],
+      },
+    })
+    assert.equal(res.status, 201)
+    const id = (body.campaign as { id: string }).id
+    const { rows } = await pool.query<{
+      email: string
+      source_url: string | null
+      verification_status: string | null
+      verified_at: Date | null
+    }>(
+      `SELECT email, source_url, verification_status, verified_at
+         FROM contacts WHERE campaign_id = $1 ORDER BY email`,
+      [id],
+    )
+    assert.deepEqual(
+      rows.map((r) => [
+        r.email,
+        r.source_url,
+        r.verification_status,
+        r.verified_at?.toISOString() ?? null,
+      ]),
+      [
+        ['contact@acme.fr', null, 'unverified', null],
+        [
+          'recrutement@acme.fr',
+          'https://acme.fr/carrieres',
+          'valid',
+          '2026-09-29T10:00:00.000Z',
+        ],
+      ],
+    )
+
+    // The campaign page reads them back: the count for the notice, the
+    // provenance row by row.
+    const { createContactRepository } = await import('../services/contacts.js')
+    const listed = await createContactRepository(pool).list(id, { limit: 10, offset: 0 })
+    assert.equal(listed.fromMailfind, 2)
+    const recruiting = listed.contacts.find((c) => c.email === 'recrutement@acme.fr')
+    assert.equal(recruiting?.source, 'mailfind')
+    assert.equal(recruiting.source_url, 'https://acme.fr/carrieres')
+    assert.equal(recruiting.verification_status, 'valid')
+  })
+
+  it('refuses a status MailFind never sends, and a verified status without its date', async () => {
+    for (const contact of [
+      {
+        email: 'a@acme.fr',
+        verification_status: 'invalid',
+        verified_at: '2026-09-29T10:00:00Z',
+      },
+      { email: 'a@acme.fr', verification_status: 'valid' },
+      { email: 'a@acme.fr', source_url: 'javascript:alert(1)' },
+    ]) {
+      const { res } = await call('/campaigns', {
+        secret: token,
+        key: `refused-${JSON.stringify(contact)}`.slice(0, 200),
+        body: { name: 'Refusée', contacts: [contact] },
+      })
+      assert.equal(res.status, 400, JSON.stringify(contact))
+    }
+  })
+
   it('checks the scope of the token', async () => {
     const { res, body } = await call('/campaigns', {
       secret: readOnlyToken,
@@ -249,6 +341,17 @@ describe('the v1 API', { skip: !loaded }, () => {
     })
     assert.equal(res.status, 403)
     assert.equal(body.code, 'insufficient_scope')
+  })
+
+  it('serves its OpenAPI document without a token', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/openapi.json`)
+    const document = (await res.json()) as {
+      openapi: string
+      paths: Record<string, unknown>
+    }
+    assert.equal(res.status, 200)
+    assert.equal(document.openapi, '3.1.0')
+    assert.ok('/campaigns' in document.paths)
   })
 
   it('answers 404 on an unknown route, still behind the token', async () => {

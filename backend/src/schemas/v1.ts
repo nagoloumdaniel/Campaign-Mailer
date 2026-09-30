@@ -16,8 +16,26 @@ export const v1ContactSchema = z
     contact_name: z.string().max(400).optional(),
     company_name: z.string().max(400).optional(),
     salutation: z.string().max(400).optional(),
+    // What MailFind knows about the address: the page it was found on, and
+    // its verification. `valid` is the only status that says a mailbox was
+    // confirmed; MailFind never sends an invalid or suppressed address.
+    source_url: z
+      .url({ protocol: /^https?$/ })
+      .max(2000)
+      .optional(),
+    verification_status: z
+      .enum(['valid', 'accept_all', 'risky', 'unknown', 'unverified'])
+      .optional(),
+    verified_at: z.iso.datetime({ offset: true }).optional(),
   })
   .strict()
+  .refine(
+    (row) =>
+      row.verification_status === undefined ||
+      row.verification_status === 'unverified' ||
+      row.verified_at !== undefined,
+    { message: 'A verification status other than unverified needs its verified_at' },
+  )
 
 const contacts = z.array(v1ContactSchema).max(IMPORT_BATCH_LIMIT)
 
