@@ -1,10 +1,36 @@
 # Campaign Mailer
 
+![React](https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
+![Express](https://img.shields.io/badge/Express_5-000000?style=flat-square&logo=express&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL_(Neon)-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/BullMQ_%2F_Redis-DC382D?style=flat-square&logo=redis&logoColor=white)
+![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat-square&logo=playwright&logoColor=white)
+![License](https://img.shields.io/badge/license-proprietary-lightgrey?style=flat-square)
+
 Web application to create, personalize and send email campaigns at scale, from the user's own Gmail account.
 
 Each user connects their Google account, imports a contact list, writes one template with merge variables, attaches a file such as a CV, then lets the application send the campaign at a controlled pace that respects Gmail's daily quota.
 
 Intended users: students sending applications, recruiters, and small B2B prospecting campaigns.
+
+## Fonctionnalités clés
+
+- Connexion Google (OAuth 2.0 via Passport.js), aucun mot de passe propre à l'application
+- Éditeur de campagne avec variables de fusion, pièces jointes (jusqu'à cinq, stockées sur Cloudflare R2) et aperçu d'e-mail fidèle (bureau / mobile)
+- Import de contacts par CSV, et carnet d'adresses unique par compte (ajout manuel, CSV, ou via MailFind)
+- Envoi programmé (immédiat ou à une date/heure choisie), cadencé pour respecter le quota Gmail (450 messages / 24 h glissantes, pause ≥ 30 s entre deux envois)
+- Historique des envois, filtrable par campagne, et relance d'une sélection sans réimport
+- Tableau de bord avec répartition du quota journalier entre campagnes actives
+- API v1 versionnée (`/api/v1`) pour l'intégration avec [MailFind](https://github.com/nagoloumdaniel/MailFind), protégée par jeton personnel et clé d'idempotence
+- Journalisation structurée (pino), remontée d'erreurs (Sentry), endpoints `/api/health` et `/api/ready`
+- Export des données, suppression de compte, journal d'audit, rotation de la clé de chiffrement (RGPD)
+
+## Démo
+
+Démo en ligne : **[campaignmailer.vercel.app](https://campaignmailer.vercel.app)**
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/captures/campaign-mailer-connexion-sombre.png">
@@ -231,3 +257,7 @@ Exceeding the cap, or sending an identical message to a large list, can get a Go
 Proprietary. Copyright (c) 2026 Daniel Nagoloum Talla. All rights reserved.
 
 No right to use, copy, modify or distribute this software is granted. See [LICENSE](LICENSE) for the full terms, and [CONTRIBUTING.md](CONTRIBUTING.md) before submitting any contribution.
+
+---
+
+Daniel Nagoloum Talla — [GitHub](https://github.com/nagoloumdaniel) · [Portfolio](https://nagoloum.vercel.app)
