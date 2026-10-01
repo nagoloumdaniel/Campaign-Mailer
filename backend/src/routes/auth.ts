@@ -4,6 +4,7 @@ import passport from 'passport'
 import { env } from '../config/env.js'
 import { SESSION_COOKIE_NAME } from '../config/session.js'
 import { buildAuthorizationOptions } from '../services/googleAuth.js'
+import { PENDING_COOKIE, readCookie, STATE_PATTERN } from '../services/sso.js'
 import { toPublicUser, type UserRow } from '../services/users.js'
 
 export const authRouter = Router()
@@ -40,7 +41,17 @@ authRouter.get(
     failureRedirect: `${env.frontendUrl}/login?error=google`,
     session: true,
   }),
-  (_req, res) => {
+  (req, res) => {
+    // MailFind was waiting on this sign-in for a code (routes/sso.ts): go
+    // back there rather than to the dashboard.
+    const pending = readCookie(req, PENDING_COOKIE)
+
+    if (pending !== undefined && STATE_PATTERN.test(pending)) {
+      res.clearCookie(PENDING_COOKIE, { path: '/api' })
+      res.redirect(`/api/sso/authorize?state=${encodeURIComponent(pending)}`)
+      return
+    }
+
     res.redirect(env.frontendUrl)
   },
 )

@@ -23,7 +23,9 @@ import { createCampaignRepository } from './services/campaigns.js'
 import { createContactRepository } from './services/contacts.js'
 import { createIdempotencyRepository } from './services/idempotency.js'
 import { createIntegrationTokenRepository } from './services/integrationTokens.js'
+import { createSsoCodeRepository, ssoConfig } from './services/sso.js'
 import { createUserRepository } from './services/users.js'
+import { createSsoTokenRouter } from './routes/sso.js'
 
 export interface AppDeps extends ApiRouterDeps {
   /** Injected so tests can build the app without a Redis connection. */
@@ -42,6 +44,7 @@ export function createApp({
   sessionStore,
   requestDispatch,
   checkReadiness,
+  ssoExchange,
 }: AppDeps): Express {
   const app = express()
 
@@ -76,6 +79,16 @@ export function createApp({
   app.use(express.json({ limit: '1mb' }))
   app.use(express.urlencoded({ extended: false }))
 
+  // MailFind trades its sign-in codes here, server to server: no cookie, so
+  // before the session, with the shared secret instead (services/sso.ts).
+  app.use(
+    '/api/sso',
+    createSsoTokenRouter({
+      codes: createSsoCodeRepository(pool),
+      config: ssoConfig(env.mailfind),
+    }),
+  )
+
   app.use(
     session(
       buildSessionOptions({
@@ -105,7 +118,7 @@ export function createApp({
     }),
   )
 
-  app.use('/api', createApiRouter({ requestDispatch, checkReadiness }))
+  app.use('/api', createApiRouter({ requestDispatch, checkReadiness, ssoExchange }))
 
   app.use(notFound)
   app.use(errorHandler)

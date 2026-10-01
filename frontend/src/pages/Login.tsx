@@ -7,6 +7,7 @@ import { Logo } from '@/components/layout/Logo'
 import { ThemeToggle } from '@/components/layout/ThemeToggle'
 import { FullPageSpinner } from '@/components/FullPageSpinner'
 import { GoogleSignInButton } from '@/components/GoogleSignInButton'
+import { MailfindSignInButton } from '@/components/MailfindSignInButton'
 import { ServerUnreachable } from '@/components/ServerUnreachable'
 import { Icon, type IconName } from '@/components/ui/Icon'
 import { GOOGLE_PERMISSIONS_URL, type DeletionReport } from '@/services/account'
@@ -23,7 +24,9 @@ import { GOOGLE_PERMISSIONS_URL, type DeletionReport } from '@/services/account'
 export function Login() {
   const { status } = useAuth()
   const [params] = useSearchParams()
-  const failed = params.get('error') === 'google'
+  const error = params.get('error')
+  const failed = error === 'google'
+  const mailfindFailure = error === null ? undefined : MAILFIND_ERRORS[error]
   const deleted = (useLocation().state as { deleted?: DeletionReport } | null)?.deleted
 
   if (status === 'loading') {
@@ -109,9 +112,24 @@ export function Login() {
             </p>
           )}
 
-          <div className="mt-6">
+          {mailfindFailure && (
+            <p
+              role="alert"
+              className="mt-6 flex enter items-start gap-2 rounded-xl border border-danger/30 bg-danger-soft px-3.5 py-3 text-[13px] text-danger"
+            >
+              <Icon name="alert" size={15} className="mt-px shrink-0" />
+              {mailfindFailure}
+            </p>
+          )}
+
+          <div className="mt-6 space-y-2.5">
             <GoogleSignInButton />
+            <MailfindSignInButton />
           </div>
+          <p className="mt-2.5 text-[12px] leading-relaxed text-ink-muted">
+            Un seul compte par adresse : par Google ou par MailFind, vous retrouvez le
+            même.
+          </p>
         </div>
 
         <div aria-hidden="true" className="hidden w-px self-stretch bg-border md:block" />
@@ -136,6 +154,14 @@ export function Login() {
       <Footer />
     </div>
   )
+}
+
+/** What a failed sign-in through MailFind means, keyed by the API's redirect. */
+const MAILFIND_ERRORS: Record<string, string> = {
+  mailfind: 'La connexion avec MailFind n’a pas abouti. Réessayez dans un instant.',
+  'mailfind-conflict':
+    'Cette adresse est déjà liée à un autre compte Google. Continuez avec Google, avec le compte qui porte cette adresse.',
+  'mailfind-unavailable': 'La connexion avec MailFind est indisponible pour le moment.',
 }
 
 function Point({ icon, children }: { icon: IconName; children: ReactNode }) {

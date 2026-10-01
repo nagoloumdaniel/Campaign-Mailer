@@ -28,8 +28,23 @@ export interface UserRow {
   google_id: string
   /** The version of the terms this user accepted, or null before the first. */
   terms_version: string | null
+  /**
+   * Whether Google granted sending. False for an account created through
+   * MailFind until its first Google sign-in here. Derived, never a token.
+   */
+  gmail_connected?: boolean
   created_at: Date
   updated_at: Date
+}
+
+/** The columns every query returning a UserRow selects. */
+export const USER_COLUMNS = `id, email, google_id, terms_version,
+  (google_refresh_token IS NOT NULL) AS gmail_connected, created_at, updated_at`
+
+/** An identity MailFind vouched for: the Google id and the address, no token. */
+export interface PartnerIdentity {
+  googleId: string
+  email: string
 }
 
 /** The only shape of a user that may cross the API boundary. */
@@ -39,6 +54,8 @@ export interface PublicUser {
   createdAt: string
   /** Lets the interface ask for acceptance before anything else. */
   termsVersion: string | null
+  /** Lets the interface ask for Gmail access before a campaign can start. */
+  gmailConnected: boolean
 }
 
 /**
@@ -54,11 +71,18 @@ export function toPublicUser(user: UserRow): PublicUser {
     email: user.email,
     createdAt: new Date(user.created_at).toISOString(),
     termsVersion: user.terms_version ?? null,
+    gmailConnected: user.gmail_connected === true,
   }
 }
 
 export interface UserRepository extends UserAuthRepository {
   upsertFromGoogle(input: UpsertGoogleUser): Promise<UserRow>
+  /**
+   * Finds or creates the account behind a MailFind sign-in, by Google id. An
+   * address already held by another Google id raises the unique violation
+   * (23505) instead of being linked.
+   */
+  upsertFromPartner(input: PartnerIdentity): Promise<UserRow>
   /** Used to rebuild the request user from the session. Null when the account is gone. */
   findById(id: string): Promise<UserRow | null>
 }
@@ -74,7 +98,16 @@ const UPSERT_SQL = `
     -- account unable to send until the user revokes access and starts over.
     google_refresh_token    = COALESCE(EXCLUDED.google_refresh_token, users.google_refresh_token),
     google_token_expires_at = COALESCE(EXCLUDED.google_token_expires_at, users.google_token_expires_at)
-  RETURNING id, email, google_id, terms_version, created_at, updated_at
+  RETURNING ${USER_COLUMNS}
+`
+
+// No token columns: MailFind never has any to give. A later Google sign-in
+// fills them on the same row, found by the same Google id.
+const UPSERT_PARTNER_SQL = `
+  INSERT INTO users (google_id, email)
+  VALUES ($1, $2)
+  ON CONFLICT (google_id) DO UPDATE SET email = EXCLUDED.email
+  RETURNING ${USER_COLUMNS}
 `
 
 export function createUserRepository(pool: Pool): UserRepository {
@@ -97,9 +130,24 @@ export function createUserRepository(pool: Pool): UserRepository {
       return row
     },
 
+    async upsertFromPartner(input) {
+      const { rows } = await pool.query<UserRow>(UPSERT_PARTNER_SQL, [
+        input.googleId,
+        input.email.toLowerCase(),
+      ])
+
+      const row = rows[0]
+
+      if (!row) {
+        throw new Error('Upsert returned no row')
+      }
+
+      return row
+    },
+
     async findById(id) {
       const { rows } = await pool.query<UserRow>(
-        'SELECT id, email, google_id, terms_version, created_at, updated_at FROM users WHERE id = $1',
+        `SELECT ${USER_COLUMNS} FROM users WHERE id = $1`,
         [id],
       )
 

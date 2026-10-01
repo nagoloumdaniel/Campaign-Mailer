@@ -22,7 +22,14 @@ describe('toPublicUser', () => {
       email: 'person@example.com',
       createdAt: '2026-09-11T10:00:00.000Z',
       termsVersion: null,
+      gmailConnected: false,
     })
+  })
+
+  it('says whether Gmail sending is granted, as a flag and nothing more', () => {
+    const connected = { ...row, gmail_connected: true } as UserRow
+
+    assert.equal(toPublicUser(connected).gmailConnected, true)
   })
 
   it('lets no token through, whatever the row carries', () => {

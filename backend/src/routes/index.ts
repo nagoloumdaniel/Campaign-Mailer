@@ -19,7 +19,9 @@ import { createIntegrationTokenRepository } from '../services/integrationTokens.
 import { createLogExportRepository } from '../services/logExport.js'
 import type { ReadinessReport } from '../services/readiness.js'
 import { createStatsRepository } from '../services/stats.js'
+import { createSsoCodeRepository, ssoConfig, type SsoExchange } from '../services/sso.js'
 import { STARTER_TEMPLATES } from '../services/starterTemplates.js'
+import { createUserRepository } from '../services/users.js'
 import { TEMPLATE_VARIABLES } from '../services/template.js'
 
 import { createAddressBookRouter } from './addressBook.js'
@@ -32,6 +34,7 @@ import { createHistoryRouter } from './history.js'
 import { createIntegrationTokenRouter } from './integrationTokens.js'
 import { createLogExportRouter } from './logExport.js'
 import { createReadyRouter } from './ready.js'
+import { createMailfindSignInRouter, createSsoAuthorizeRouter } from './sso.js'
 import { createStatsRouter } from './stats.js'
 import { createUsersRouter } from './users.js'
 
@@ -43,6 +46,8 @@ export interface ApiRouterDeps {
   requestDispatch?: ((campaignId: string) => Promise<void>) | undefined
   /** Probes the dependencies for /api/ready. Absent in tests that build the app bare. */
   checkReadiness?: (() => Promise<ReadinessReport>) | undefined
+  /** The MailFind code exchange. Absent outside tests, where the real call is used. */
+  ssoExchange?: SsoExchange | undefined
 }
 
 /**
@@ -64,6 +69,21 @@ export function createApiRouter(deps: ApiRouterDeps = {}): Router {
     apiRouter.use('/ready', createReadyRouter(deps.checkReadiness))
   }
 
+  // Sign in with MailFind, both ways (MailFind decision D-26).
+  const sso = ssoConfig(env.mailfind)
+  apiRouter.use(
+    '/sso',
+    createSsoAuthorizeRouter({ codes: createSsoCodeRepository(pool), config: sso }),
+  )
+  apiRouter.use(
+    '/auth/mailfind',
+    createMailfindSignInRouter({
+      users: createUserRepository(pool),
+      config: sso,
+      frontendUrl: env.frontendUrl,
+      exchange: deps.ssoExchange,
+    }),
+  )
   apiRouter.use('/auth', authRouter)
 
   const audit = createAuditLog(pool)
