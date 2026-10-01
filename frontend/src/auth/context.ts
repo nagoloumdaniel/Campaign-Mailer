@@ -6,6 +6,11 @@ export interface CurrentUser {
   createdAt: string
   /** The version of the terms accepted, or null before the first acceptance. */
   termsVersion: string | null
+  /**
+   * False for an account created through MailFind until Google grants sending.
+   * Optional so an older API answer reads as "unknown", never as "missing".
+   */
+  gmailConnected?: boolean
 }
 
 /**

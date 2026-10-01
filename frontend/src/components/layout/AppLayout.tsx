@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 
+import { GmailAccessBanner } from '../GmailAccessBanner'
+
 import { Footer } from './Footer'
 import { Navbar } from './Navbar'
 
@@ -36,6 +38,7 @@ export function AppLayout() {
         key={pathname}
         className="mx-auto w-full max-w-6xl flex-1 enter-fade px-4 pt-6 pb-12 sm:px-5 sm:pt-8"
       >
+        <GmailAccessBanner />
         <Outlet />
       </main>
 

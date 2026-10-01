@@ -124,9 +124,12 @@ describe(
       const row = await users.findById(userId)
 
       assert.ok(row)
+      // gmail_connected is derived in SQL, a boolean, never the token itself.
+      assert.equal(typeof row.gmail_connected, 'boolean')
       assert.deepEqual(Object.keys(row).sort(), [
         'created_at',
         'email',
+        'gmail_connected',
         'google_id',
         'id',
         'terms_version',

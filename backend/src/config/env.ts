@@ -61,6 +61,18 @@ function nodeEnv(): NodeEnv {
   return raw as NodeEnv
 }
 
+function ssoSecret(): string {
+  const value = process.env.MAILFIND_SSO_SECRET ?? ''
+
+  // A short shared secret is one an attacker can grind through the token
+  // endpoint; refusing to boot beats running with it.
+  if (value !== '' && value.length < 32) {
+    throw new Error('MAILFIND_SSO_SECRET must be at least 32 characters')
+  }
+
+  return value
+}
+
 export const env = {
   nodeEnv: nodeEnv(),
   port: optionalInteger('PORT', 3000, 1, 65535),
@@ -118,6 +130,14 @@ export const env = {
   sentryDsn: process.env.SENTRY_DSN ?? '',
   // Tags each error with the deployed commit; Railway sets it on every deploy.
   release: process.env.RAILWAY_GIT_COMMIT_SHA,
+
+  // Sign in with MailFind, and MailFind signing in with this application:
+  // MailFind's address and the secret both sides share to trade sign-in codes.
+  // Empty, both buttons stay inert. See services/sso.ts.
+  mailfind: {
+    url: (process.env.MAILFIND_URL ?? '').replace(/\/+$/, ''),
+    ssoSecret: ssoSecret(),
+  },
 
   google: {
     clientId: required('GOOGLE_CLIENT_ID'),
