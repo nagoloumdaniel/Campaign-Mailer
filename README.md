@@ -1,7 +1,5 @@
 # Campaign Mailer
 
-[![CI](https://github.com/Nagoloum/Campaign-Mailer/actions/workflows/ci.yml/badge.svg)](https://github.com/Nagoloum/Campaign-Mailer/actions/workflows/ci.yml)
-
 Web application to create, personalize and send email campaigns at scale, from the user's own Gmail account.
 
 Each user connects their Google account, imports a contact list, writes one template with merge variables, attaches a file such as a CV, then lets the application send the campaign at a controlled pace that respects Gmail's daily quota.
@@ -12,7 +10,11 @@ Intended users: students sending applications, recruiters, and small B2B prospec
 
 ## Status
 
-**Beta, and staying there for now (22 September 2026).** Campaign Mailer is online at campaignmailer.vercel.app and used by beta testers. The owner has chosen to keep it in beta: no public launch and no new roadmap phase until further notice, only requested changes and fixes.
+**Beta, and staying there for now (22 September 2026).** Campaign Mailer is online at [campaignmailer.vercel.app](https://campaignmailer.vercel.app) and used by beta testers. The owner has chosen to keep it in beta: no public launch and no new roadmap phase until further notice, only requested changes and fixes.
+
+**A v1 API, and sign-in with MailFind (1 October 2026).** [MailFind](https://github.com/nagoloumdaniel/MailFind), the companion project that finds the addresses, now reaches this application through a versioned API rather than a file. `POST /api/v1/campaigns` creates a draft and `POST /api/v1/campaigns/:id/contacts` adds up to 2 000 rows to it, both behind a personal integration token with its own scopes, both requiring an `Idempotency-Key` so a replayed batch never duplicates a contact. The document is served on `/api/v1/openapi.json` and contract tests fail when a route and the document disagree. A campaign MailFind creates stays a **draft**: only the user launches it. Each contact keeps where MailFind found it and how it was verified, and the campaign's contact list says which ones came from MailFind, with a link to the page.
+
+The two applications are also each other's identity provider: "Continuer avec MailFind" here, "Se connecter avec Campaign Mailer" there. One account per Google identity, found by that id, never duplicated, and an address another Google account holds is refused rather than linked. No Google token crosses between them, so an account created through MailFind cannot send until Google grants it: the application says so and asks for the authorization. The reasoning is MailFind's decision D-26.
 
 **One address book per account (22 September 2026).** Contacts now lists each email address once, whatever brought it (a CSV, a manual add, MailFind later), whether a campaign uses it or not, with its name, company, salutation, date added and origin. Every contact can be edited at any time: the campaigns still to send take the change, and what was already sent stays as it went out. The history leads with the launched campaigns and their results, sortable, and a click filters the send log to one campaign.
 
@@ -38,18 +40,18 @@ Still open from Phase 0: the Google verification request. Until it is filed and 
 
 Decided on 10 September 2026. The reasoning, including three deliberate departures from the specification, is in the decision table of [ROADMAP.md](ROADMAP.md#phase-0--fondations-et-décisions-gelées).
 
-| Layer         | Choice                                                        |
-| ------------- | ------------------------------------------------------------- |
-| Frontend      | React 19, Vite, TypeScript, Tailwind CSS, React Router        |
-| Backend       | Node.js, Express 5, TypeScript                                |
-| Database      | PostgreSQL on Neon                                            |
-| Queue         | BullMQ on Redis (Upstash)                                     |
-| Email         | Gmail API (`users.messages.send`) over OAuth 2.0              |
-| Auth          | Passport.js, Google OAuth 2.0 strategy                        |
-| Attachments   | Cloudflare R2, S3-compatible                                  |
-| Observability | pino (JSON logs), Sentry                                      |
-| Tests         | Node's test runner through tsx, Playwright                    |
-| Hosting       | Vercel (frontend), Railway (backend); production database TBD |
+| Layer         | Choice                                                       |
+| ------------- | ------------------------------------------------------------ |
+| Frontend      | React 19, Vite, TypeScript, Tailwind CSS, React Router       |
+| Backend       | Node.js, Express 5, TypeScript                               |
+| Database      | PostgreSQL on Neon                                           |
+| Queue         | BullMQ on Redis                                              |
+| Email         | Gmail API (`users.messages.send`) over OAuth 2.0             |
+| Auth          | Passport.js, Google OAuth 2.0 strategy                       |
+| Attachments   | Cloudflare R2, S3-compatible                                 |
+| Observability | pino (JSON logs), Sentry                                     |
+| Tests         | Node's test runner through tsx, Playwright                   |
+| Hosting       | Vercel (frontend), Railway (API and worker), Neon (database) |
 
 How the pieces fit, and how a campaign becomes messages: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -65,6 +67,7 @@ campaign-mailer/
 │   ├── migrations/     SQL migrations, each with its rollback
 │   └── scripts/        migration wrapper, throwaway test database
 ├── e2e/                Playwright end-to-end tests
+├── .github/            CI workflow (GitHub Actions is off on this account)
 ├── docs/               Architecture, runbook, send engine, security, OAuth setup
 ├── ROADMAP.md          Plan of record, phase by phase
 ├── CONTRIBUTING.md     How work is done in this repository
@@ -78,7 +81,7 @@ campaign-mailer/
 ## Requirements
 
 - Node.js 24 (see `.nvmrc`; 22 is the minimum), npm 10 or later.
-- Accounts on **Neon** (PostgreSQL), **Upstash** (Redis) and **Cloudflare R2** (attachment storage). The same hosted services are used in development and in production, so nothing is installed locally and Docker is not needed. All three free tiers cover development.
+- Accounts on **Neon** (PostgreSQL), a **Redis** provider and **Cloudflare R2** (attachment storage). The same hosted services are used in development and in production, so nothing is installed locally and Docker is not needed. All three free tiers cover development.
 - A **Google Cloud project** with the Gmail API enabled and OAuth 2.0 web credentials. Step by step in [docs/google-oauth-setup.md](docs/google-oauth-setup.md).
 - Optional: a **Sentry** project, for error reporting and alerts.
 
@@ -93,7 +96,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ## Local setup
 
 ```bash
-git clone https://github.com/Nagoloum/Campaign-Mailer.git
+git clone https://github.com/nagoloumdaniel/Campaign-Mailer.git
 cd Campaign-Mailer
 npm install
 ```
@@ -120,7 +123,7 @@ npm run dev
 
 The web app is at <http://localhost:5173>; it proxies `/api` to the API on port 3000. Sign in with a Google account listed as a test user on the OAuth consent screen.
 
-The send worker is not started by `npm run dev`: an idle worker spends Redis commands, which the Upstash free tier counts. Start it in a second terminal only when you want campaigns to send:
+The send worker is not started by `npm run dev`: an idle worker spends Redis commands, which a free tier counts. Start it in a second terminal only when you want campaigns to send:
 
 ```bash
 npm run dev:worker
@@ -138,7 +141,7 @@ Each template explains every variable in place. The ones the backend refuses to 
 | ---------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
 | `DATABASE_URL`                                                         | yes                      | Neon **pooled** connection (host contains `-pooler`), `sslmode=verify-full`. Used by the API and the worker. |
 | `DATABASE_DIRECT_URL`                                                  | for migrations and tests | Neon **direct** connection (no `-pooler`). Migrations and the throwaway test schemas use it.                 |
-| `REDIS_URL`                                                            | yes                      | Upstash `rediss://` URL. Sessions and the queue.                                                             |
+| `REDIS_URL`                                                            | yes                      | `rediss://` URL. Sessions and the queue.                                                                     |
 | `SESSION_SECRET`                                                       | yes                      | Signs the session cookie, at least 32 characters. Changing it signs everyone out.                            |
 | `ENCRYPTION_KEY`                                                       | yes                      | 64 hex characters. Encrypts the Google tokens at rest. Losing it forces every user to reconnect.             |
 | `ENCRYPTION_KEY_PREVIOUS`                                              | no                       | Only during a key rotation. See [docs/security.md](docs/security.md).                                        |
@@ -151,6 +154,9 @@ Each template explains every variable in place. The ones the backend refuses to 
 | `LOG_LEVEL`                                                            | no                       | `debug` in development, `info` in production.                                                                |
 | `SENTRY_DSN`                                                           | no                       | Error reporting. Off when empty.                                                                             |
 | `WORKER_MONITOR`                                                       | no                       | Worker and queue alerts from the API. On in production, off elsewhere.                                       |
+| `TRUST_PROXY_HOPS`                                                     | no                       | Proxies whose `X-Forwarded-For` is trusted: 1 behind Railway alone, 2 when Vercel relays `/api`.             |
+| `MAILFIND_URL`                                                         | no                       | MailFind's origin. Empty, both cross sign-in buttons stay inert.                                             |
+| `MAILFIND_SSO_SECRET`                                                  | no                       | Shared with MailFind's `CAMPAIGN_MAILER_SSO_SECRET`, same value, 32 characters at least.                     |
 
 ### `frontend/.env`
 
@@ -200,6 +206,7 @@ Create a migration with `npm run migrate:create --workspace backend -- <name>`.
 ## Operating it
 
 - Health: `GET /api/health` (the process is up), `GET /api/ready` (database, sessions and queue answer; queue depth; worker heartbeat).
+- The v1 API MailFind calls: `GET /api/v1/openapi.json`. Integration tokens are created and revoked from the account page.
 - Incidents and procedures: [docs/RUNBOOK.md](docs/RUNBOOK.md).
 - Security, key rotation, retention: [docs/security.md](docs/security.md).
 - How sending works and why: [docs/send-engine.md](docs/send-engine.md).
