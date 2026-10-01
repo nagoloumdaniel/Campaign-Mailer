@@ -6,6 +6,11 @@ Each user connects their Google account, imports a contact list, writes one temp
 
 Intended users: students sending applications, recruiters, and small B2B prospecting campaigns.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/captures/campaign-mailer-connexion-sombre.png">
+  <img alt="Campaign Mailer's sign-in page: continue with Google or with MailFind, and the three things a person should know before granting send access" src="docs/captures/campaign-mailer-connexion.png">
+</picture>
+
 ---
 
 ## Status
